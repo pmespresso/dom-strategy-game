@@ -333,9 +333,11 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     function leaveAlliance(address player) public {
         require(msg.sender == address(this), "Only via submit/reveal");
         require(players[player].allianceId != 0, "Not in alliance");
+        require(player != allianceAdmins[players[player].allianceId], "Admin canot leave alliance");
 
         uint256 allianceId = players[player].allianceId;
         players[player].allianceId = 0;
+        alliances[allianceId].membersCount -= 1;
 
         emit AllianceMemberLeft(allianceId, player);
     }
