@@ -37,8 +37,12 @@ contract DomStrategyGameTest is Test {
     Loot public loot;
     MockBAYC public bayc;
 
-    address w1nt3r = 0x1E79b045Dc29eAe9fdc69673c9DCd7C53E5E159D;
-    address dhof = 0xF296178d553C8Ec21A2fBD2c5dDa8CA9ac905A00;
+    string mnemonic1 = "test test test test test test test test test test test junk";
+    string mnemonic2 = "blind lesson awful swamp borrow rapid snake unique oak blue depart exercise";
+    address w1nt3r;
+    address dhof;
+    uint256 w1nt3r_pk;
+    uint256 dhof_pk;
 
     // N.B. this should be done offchain IRL
     address[] sortedAddrs = new address[](2);
@@ -58,6 +62,12 @@ contract DomStrategyGameTest is Test {
             ,
             bytes32 keyHash
         ) = helper.activeNetworkConfig();
+
+        w1nt3r_pk = vm.deriveKey(mnemonic1, 0);
+        w1nt3r = vm.addr(w1nt3r_pk);
+
+        dhof_pk = vm.deriveKey(mnemonic2, 0);
+        dhof = vm.addr(dhof_pk);
 
         vrfCoordinator = new MockVRFCoordinatorV2();
         uint64 subscriptionId = vrfCoordinator.createSubscription();
@@ -194,13 +204,51 @@ contract DomStrategyGameTest is Test {
         
         game.resolve(turn, sortedAddrs);
 
-        (address admin, uint256 allianceId, uint256 membersCount, uint256 maxMembersCount) = game.alliances(0);
+        (address admin, uint256 allianceId, uint256 membersCount, uint256 maxMembersCount,) = game.alliances(0);
         (,,,,,uint256 allianceId_dhof,,,,,,) = game.players(dhof);
 
-        require(admin == dhof, "Dhof should be the alliance admin.");
+        require(game.allianceAdmins(allianceId) == dhof && admin == dhof, "Dhof should be the alliance admin.");
         require(allianceId == 0, "First alliance id should be 0");
         require(membersCount == 1, "Admin should be the only initial member of alliance");
         require(maxMembersCount == 5, "Max members count should be as specified by creator");
         require(allianceId == allianceId_dhof, "Alliance Id should match in Player and Alliance structs (Foreign Key)");
+
+        turn = turn + 1;
+        bytes32 nonce3 = hex"03";
+        bytes32 nonce4 = hex"04";
+
+        vm.prank(dhof);
+        bytes memory dhofMoveCall = abi.encodeWithSelector(DomStrategyGame.move.selector, dhof, int8(2));
+        // Dhof, the admin, must sign the application offchain
+        bytes memory application = abi.encodePacked(turn, allianceId);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(dhof_pk, keccak256(application));
+        
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, dhofMoveCall)));
+
+        vm.prank(w1nt3r);
+        bytes memory w1nt3rApplyToAllianceCall = abi.encodeWithSelector(DomStrategyGame.joinAlliance.selector, w1nt3r, 0, v, r, s);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, w1nt3rApplyToAllianceCall)));
+
+        vm.warp(block.timestamp + 19 hours);
+
+        vm.prank(dhof);
+        game.reveal(turn, nonce3, dhofMoveCall);
+
+        vm.prank(w1nt3r);
+        game.reveal(turn, nonce4, w1nt3rApplyToAllianceCall);
+
+        game.rollDice(turn);
+        vrfCoordinator.fulfillRandomWords(
+            game.vrf_requestId(),
+            address(game)
+        );
+        
+        game.resolve(turn, sortedAddrs);
+
+        (, , uint256 membersCount_post_join,, ) = game.alliances(0);
+        (,,,,,uint256 allianceId_w1nt3r,,,,,,) = game.players(w1nt3r);
+
+        require(membersCount_post_join == 2, "Alliance should have 2 members after w1nt3r joins.");
+        require(allianceId_w1nt3r == 0, "w1nt3r should be member of alliance 0");
     }
 }

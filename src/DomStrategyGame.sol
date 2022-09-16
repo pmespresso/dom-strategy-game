@@ -32,13 +32,14 @@ struct Alliance {
     uint256 id;
     uint256 membersCount;
     uint256 maxMembers;
+    string name;
 }
 
 contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     Loot public loot;
     mapping(address => Player) public players;
     mapping(uint256 => Alliance) public alliances;
-    mapping(uint256 => address) allianceAdmins;
+    mapping(uint256 => address) public allianceAdmins;
     mapping(address => uint256) public spoils;
 
     // bring your own NFT kinda
@@ -216,15 +217,15 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             fieldSize -= 2;
         }
 
-        bytes32 lastHash = 0;
         // TODO: this will exceed block gas limit eventually, need to split `resolve` in a way that it can be called incrementally
         for (uint256 i = 0; i < sortedAddrs.length; i++) {
             address addr = sortedAddrs[i];
             Player storage player = players[addr];
-
-            bytes32 currentHash = keccak256(abi.encodePacked(addr, randomness));
-            require(currentHash > lastHash, "Not sorted");
-            lastHash = currentHash;
+            
+            // TODO: What did w1nt3r intend with sorting the hashed addresses?
+            // bytes32 currentHash = keccak256(abi.encodePacked(addr, randomness));
+            // require(currentHash > lastHash, "Not sorted");
+            // lastHash = currentHash;
 
             (bool success, bytes memory err) = address(this).call(player.pendingMove);
 
@@ -291,7 +292,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             admin: player,
             id: nextAvailableAllianceId,
             membersCount: 1,
-            maxMembers: maxMembers
+            maxMembers: maxMembers,
+            name: name
         });
         alliances[nextAvailableAllianceId] = newAlliance;
         nextAvailableAllianceId += 1;
@@ -302,18 +304,28 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     function joinAlliance(
         address player,
         uint256 allianceId,
-        bytes calldata signature
+        uint8 v,
+        bytes32 r,
+        bytes32 s
     ) public {
         require(msg.sender == address(this), "Only via submit/reveal");
 
         // Admin must sign the application off-chain. Applications are per-move based, so the player
         // can't reuse the application from the previous move
         bytes memory application = abi.encodePacked(currentTurn, allianceId);
-        bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(application));
-        address admin = ECDSA.recover(hash, signature);
+
+        bytes32 hash = keccak256(application);
+        // address admin = ECDSA.recover(hash, signature
+        address admin = ecrecover(hash, v, r, s);
 
         require(allianceAdmins[allianceId] == admin, "Not signed by admin");
         players[player].allianceId = allianceId;
+        
+        Alliance memory alliance = alliances[allianceId];
+        
+        require(alliance.membersCount < alliance.maxMembers - 1, "Cannot exceed max members count.");
+
+        alliances[allianceId].membersCount += 1;
 
         emit AllianceMemberJoined(players[player].allianceId, player);
     }
