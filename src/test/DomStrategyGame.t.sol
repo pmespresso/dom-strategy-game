@@ -80,6 +80,12 @@ contract DomStrategyGameTest is Test {
 
         vrfCoordinator.addConsumer(subscriptionId, address(game));
 
+        game.init();
+        vrfCoordinator.fulfillRandomWords(
+            game.vrf_requestId(),
+            address(game)
+        );
+
         vm.deal(w1nt3r, 1 ether);
         vm.deal(dhof, 100 ether);
 
@@ -101,6 +107,22 @@ contract DomStrategyGameTest is Test {
         bayc.setApprovalForAll(address(game), true);
         game.connect{value: 6.9 ether}(1, address(bayc));
         vm.stopPrank();
+    }
+
+    function revealAndResolve(uint256 turn, bytes32 nonce1,bytes32 nonce2,bytes memory call1, bytes memory call2) public {
+        vm.prank(w1nt3r);
+        game.reveal(turn, nonce1, call1);
+
+        vm.prank(dhof);
+        game.reveal(turn, nonce2, call2);
+
+        game.rollDice(turn);
+        vrfCoordinator.fulfillRandomWords(
+            game.vrf_requestId(),
+            address(game)
+        );
+        
+        game.resolve(turn, sortedAddrs);
     }
 
     function testConnect() public {
@@ -143,19 +165,7 @@ contract DomStrategyGameTest is Test {
         // every 18 hours all players need to reveal their respective move for that turn.
         vm.warp(block.timestamp + 19 hours);
 
-        vm.prank(w1nt3r);
-        game.reveal(turn, nonce1, call1);
-
-        vm.prank(dhof);
-        game.reveal(turn, nonce2, call2);
-
-        game.rollDice(turn);
-        vrfCoordinator.fulfillRandomWords(
-            game.vrf_requestId(),
-            address(game)
-        );
-        
-        game.resolve(turn, sortedAddrs);
+        revealAndResolve(turn, nonce1, nonce2, call1, call2);
 
         (,,,,,,uint256 hp_w1nt3r,,uint256 x_w1nt3r,uint256 y_w1nt3r,bytes32 pendingMoveCommitment_w1nt3r,) = game.players(w1nt3r);
         (,,,,,,uint256 hp_dhof,,uint256 x_dhof,uint256 y_dhof,bytes32 pendingMoveCommitment_dhof,) = game.players(dhof);
@@ -189,20 +199,8 @@ contract DomStrategyGameTest is Test {
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, restCall)));
 
         vm.warp(block.timestamp + 19 hours);
-
-        vm.prank(dhof);
-        game.reveal(turn, nonce1, createAllianceCall);
-
-        vm.prank(w1nt3r);
-        game.reveal(turn, nonce2, restCall);
-
-        game.rollDice(turn);
-        vrfCoordinator.fulfillRandomWords(
-            game.vrf_requestId(),
-            address(game)
-        );
         
-        game.resolve(turn, sortedAddrs);
+        revealAndResolve(turn, nonce2, nonce1, restCall, createAllianceCall);
 
         (address admin, uint256 allianceId, uint256 membersCount, uint256 maxMembersCount,) = game.alliances(0);
         (,,,,,uint256 allianceId_dhof,,,,,,) = game.players(dhof);
@@ -231,24 +229,54 @@ contract DomStrategyGameTest is Test {
 
         vm.warp(block.timestamp + 19 hours);
 
-        vm.prank(dhof);
-        game.reveal(turn, nonce3, dhofMoveCall);
-
-        vm.prank(w1nt3r);
-        game.reveal(turn, nonce4, w1nt3rApplyToAllianceCall);
-
-        game.rollDice(turn);
-        vrfCoordinator.fulfillRandomWords(
-            game.vrf_requestId(),
-            address(game)
-        );
-        
-        game.resolve(turn, sortedAddrs);
+        revealAndResolve(turn, nonce4, nonce3, w1nt3rApplyToAllianceCall, dhofMoveCall);
 
         (, , uint256 membersCount_post_join,, ) = game.alliances(0);
         (,,,,,uint256 allianceId_w1nt3r,,,,,,) = game.players(w1nt3r);
 
         require(membersCount_post_join == 2, "Alliance should have 2 members after w1nt3r joins.");
         require(allianceId_w1nt3r == 0, "w1nt3r should be member of alliance 0");
+    }
+
+    function testBattle() public {
+        connect();
+
+        uint256 turn = game.currentTurn() + 1;
+        bytes32 nonce1 = hex"01";
+        bytes32 nonce2 = hex"02";
+
+        game.start();
+
+        // dhof
+        (,,,,,,,,uint256 x_dhof,uint256 y_dhof,,) = game.players(dhof);
+        vm.assume(x_dhof == 4);
+        vm.assume(y_dhof == 4);
+        vm.prank(dhof);
+        bytes memory dhofRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, dhofRest)));
+
+        // w1nt3r
+        (,,,,,,,,uint256 x_w1nt3r,uint256 y_w1nt3r,,) = game.players(w1nt3r);
+        vm.assume(x_w1nt3r == 4);
+        vm.assume(y_w1nt3r == 5);
+        bytes memory w1nt3rMoveUp = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(1));
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, w1nt3rMoveUp)));
+
+        vm.warp(block.timestamp + 19 hours);
+
+        revealAndResolve(turn, nonce1, nonce2, dhofRest, w1nt3rMoveUp);
+
+        // Assume two players without an Alliance are battling
+        // Assume w1nt3r loses and dhof wins
+        // check spoils transfered
+        uint256 loser_spoils = game.spoils(w1nt3r);
+        uint256 winner_spoils = game.spoils(dhof);
+        require(loser_spoils == 0, "Loser gets all their spoils taken.");
+        require(winner_spoils == 7.9 ether, "Winner gets all the spoils of the defeated.");
+
+        // (,,,,,,,,uint256 x_w1nt3r_after,uint256 y_w1nt3r_after,,) = game.players(w1nt3r);
+        // require(x_w1nt3r_after )
+        // check player count reduced
+        // check only winner occupies the disputed cell after battle
     }
 }

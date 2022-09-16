@@ -51,11 +51,11 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     VRFCoordinatorV2Interface immutable COORDINATOR;
     LinkTokenInterface immutable LINKTOKEN;
     address public vrf_owner;
-    uint64 public vrf_subscriptionId;
     bytes32 immutable vrf_keyHash;
-    uint32 immutable vrf_callbackGasLimit = 2_500_000;
     uint16 immutable vrf_requestConfirmations = 3;
+    uint32 immutable vrf_callbackGasLimit = 2_500_000;
     uint32 immutable vrf_numWords = 3;
+    uint64 public vrf_subscriptionId;
     uint256 public randomness;
     uint256 public vrf_requestId;
     uint256 nextAvailableAllianceId = 0;
@@ -66,6 +66,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     // TODO make random to prevent position sniping...?
     uint256 public nextAvailableRow = 0;
     uint256 public nextAvailableCol = 0;
+    uint256[2] internal jailCell;
 
     event ReturnedRandomness(uint256[] randomWords);
     event Constructed(address owner, uint64 subscriptionId);
@@ -102,6 +103,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         address indexed player
     );
     event Move(address indexed who, uint newX, uint newY);
+    event BattleCommenced(address indexed player1, address indexed player2);
+    event BattleFinished(address indexed winner, uint256 spoils);
 
     constructor(
         Loot _loot,
@@ -121,6 +124,10 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         vrf_subscriptionId = _subscriptionId;
 
         emit Constructed(vrf_owner, vrf_subscriptionId);
+    }
+
+    function init() external {
+        requestRandomWords();
     }
 
     function connect(uint256 tokenId, address byoNft) external payable {
@@ -160,9 +167,14 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     function start() external {
         require(currentTurn == 0, "Already started");
         require(activePlayers > 1, "No players");
+        require(randomness != 0, "Need randomness for jail cell");
 
         currentTurn = 1;
         currentTurnStartTimestamp = block.timestamp;
+
+        console.log("randomness ", randomness);
+
+        jailCell = [randomness >> 128, randomness & (2**128 - 1)];
 
         emit TurnStarted(currentTurn, currentTurnStartTimestamp);
     }
@@ -198,9 +210,9 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     // who rolls the dice and when?
     function rollDice(uint256 turn) external {
         require(turn == currentTurn, "Stale tx");
-        require(randomness == 0, "Already rolled");
-        require(vrf_requestId == 0, "Already rolling");
-        // require(block.timestamp > currentTurnStartTimestamp + 36 hours);
+        // require(randomness == 0, "Already rolled");
+        // require(vrf_requestId == 0, "Already rolling");
+        // require(block.timestamp > currentTurnStartTimestamp + 18 hours);
 
         requestRandomWords();
     }
@@ -342,6 +354,19 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         emit AllianceMemberLeft(allianceId, player);
     }
 
+    function _battle(address player1Addr, address player2Addr) internal {
+        require(player1Addr != player2Addr, "Cannot fight yourself");
+
+        Player storage player1 = players[player1Addr];
+        Player storage player2 = players[player2Addr];
+
+        emit BattleCommenced(player1Addr, player2Addr);
+
+        requestRandomWords();
+
+
+    }
+
     // Callbacks
     function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords)
         internal
@@ -358,7 +383,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     * @notice Requests randomness
     * Assumes the subscription is funded sufficiently; "Words" refers to unit of data in Computer Science
     */
-    function requestRandomWords() internal onlyOwner {
+    function requestRandomWords() public onlyOwner {
         // Will revert if subscription is not set and funded.
         vrf_requestId = COORDINATOR.requestRandomWords(
         vrf_keyHash,

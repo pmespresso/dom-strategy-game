@@ -37,7 +37,10 @@ Made by [@w1nt3r_eth](https://twitter.com/w1nt3r_eth)
 #### Battles
 
 - When 2 players occupy the same grid slot, a battle occurs. Battles are resolved by a series of calculations (simple comparison of stats like att/def/HP/etc. with rock-paper-sissors specialization) along with a dice roll.
-- Losing player is removed from map, permanently loses spoils to the winner
+- If allies, don't fight
+<!-- - Losing player is removed from map, permanently loses spoils to the winner -->
+- Losing player is moved to a "jail" cell, which is hidden from the players (only contract can view)
+- If someone accidentally lands on the jail cell, they can roll dice to jailbreak (e.g. if their alliance members are in there).
 - If more than 2 on same grid slot, random 2 are chosen for battle. (**editor's comment**: possibly multiples of 2 can be chosen and the lucky(?) odd one sits out)
 
 #### Alliances
@@ -59,3 +62,4 @@ Made by [@w1nt3r_eth](https://twitter.com/w1nt3r_eth)
 #### Miscellaneous
 
 - Every 5 turns (a little over a week), the play field is reduced in size (Battle Royale/Fortnite,Warzone, etc.) to force more battles over time and push towards a win.
+- Items places randomly along the grid could power up attributes like hp or attack and even allow teleport
