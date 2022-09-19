@@ -127,8 +127,8 @@ contract DomStrategyGameTest is Test {
 
     function testConnect() public {
         connect();
-        (,,,,,,,,uint256 x_w1nt3r,uint256 y_w1nt3r,,) = game.players(w1nt3r);
-        (,,,,,,,,uint256 x_dhof,uint256 y_dhof,,) = game.players(dhof);
+        (,,,,,,,,uint256 x_w1nt3r,uint256 y_w1nt3r,,,) = game.players(w1nt3r);
+        (,,,,,,,,uint256 x_dhof,uint256 y_dhof,,,) = game.players(dhof);
 
         require(game.spoils(w1nt3r) > 0, "Cannot play with 0 spoils, pleb.");
         require(game.spoils(dhof) > 0, "Cannot play with 0 spoils, pleb.");
@@ -167,8 +167,8 @@ contract DomStrategyGameTest is Test {
 
         revealAndResolve(turn, nonce1, nonce2, call1, call2);
 
-        (,,,,,,uint256 hp_w1nt3r,,uint256 x_w1nt3r,uint256 y_w1nt3r,bytes32 pendingMoveCommitment_w1nt3r,) = game.players(w1nt3r);
-        (,,,,,,uint256 hp_dhof,,uint256 x_dhof,uint256 y_dhof,bytes32 pendingMoveCommitment_dhof,) = game.players(dhof);
+        (,,,,,,uint256 hp_w1nt3r,,uint256 x_w1nt3r,uint256 y_w1nt3r,bytes32 pendingMoveCommitment_w1nt3r,,) = game.players(w1nt3r);
+        (,,,,,,uint256 hp_dhof,,uint256 x_dhof,uint256 y_dhof,bytes32 pendingMoveCommitment_dhof,,) = game.players(dhof);
 
         require(x_w1nt3r == 0 && y_w1nt3r == 0, "W1nt3r should have remained in place from rest()");
         require(x_dhof == 3 && y_dhof == 0, "Dhof should have moved right one square from move(4)");
@@ -185,7 +185,6 @@ contract DomStrategyGameTest is Test {
         bytes32 nonce2 = hex"02";
 
         game.start();
-
         // dhof
         vm.prank(dhof);
 
@@ -203,7 +202,7 @@ contract DomStrategyGameTest is Test {
         revealAndResolve(turn, nonce2, nonce1, restCall, createAllianceCall);
 
         (address admin, uint256 allianceId, uint256 membersCount, uint256 maxMembersCount,) = game.alliances(0);
-        (,,,,,uint256 allianceId_dhof,,,,,,) = game.players(dhof);
+        (,,,,,uint256 allianceId_dhof,,,,,,,) = game.players(dhof);
 
         require(game.allianceAdmins(allianceId) == dhof && admin == dhof, "Dhof should be the alliance admin.");
         require(allianceId == 0, "First alliance id should be 0");
@@ -232,7 +231,7 @@ contract DomStrategyGameTest is Test {
         revealAndResolve(turn, nonce4, nonce3, w1nt3rApplyToAllianceCall, dhofMoveCall);
 
         (, , uint256 membersCount_post_join,, ) = game.alliances(0);
-        (,,,,,uint256 allianceId_w1nt3r,,,,,,) = game.players(w1nt3r);
+        (,,,,,uint256 allianceId_w1nt3r,,,,,,,) = game.players(w1nt3r);
 
         require(membersCount_post_join == 2, "Alliance should have 2 members after w1nt3r joins.");
         require(allianceId_w1nt3r == 0, "w1nt3r should be member of alliance 0");
@@ -247,27 +246,89 @@ contract DomStrategyGameTest is Test {
 
         game.start();
 
-        // dhof
-        (,,,,,,,,uint256 x_dhof,uint256 y_dhof,,) = game.players(dhof);
-        vm.assume(x_dhof == 4);
-        vm.assume(y_dhof == 4);
-        vm.prank(dhof);
-        bytes memory dhofRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
-        game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, dhofRest)));
+        /********* Turn 1 *********/
 
         // w1nt3r
-        (,,,,,,,,uint256 x_w1nt3r,uint256 y_w1nt3r,,) = game.players(w1nt3r);
-        vm.assume(x_w1nt3r == 4);
-        vm.assume(y_w1nt3r == 5);
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(w1nt3r)
+            .depth(8)
+            .checked_write(4);
+
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(w1nt3r)
+            .depth(9)
+            .checked_write(5);
+        
+        vm.prank(w1nt3r);
         bytes memory w1nt3rMoveUp = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(1));
-        game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, w1nt3rMoveUp)));
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, w1nt3rMoveUp)));
+        vm.stopPrank();
+
+        // dhof
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(dhof)
+            .depth(8) // player.x
+            .checked_write(4);
+
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(dhof)
+            .depth(9) // player.y
+            .checked_write(4);
+
+        vm.prank(dhof);
+        bytes memory dhofRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, dhofRest)));
+        vm.stopPrank();
 
         vm.warp(block.timestamp + 19 hours);
 
-        revealAndResolve(turn, nonce1, nonce2, dhofRest, w1nt3rMoveUp);
+        revealAndResolve(turn, nonce1, nonce2, w1nt3rMoveUp, dhofRest);
 
-        // Assume two players without an Alliance are battling
+        // Usual
+        // On first contact nobody will die, just damage dealt.
+        // check hp
+        (,,,,,,uint dhof_hp,uint dhof_attack,,,,,) = game.players(dhof);
+        (,,,,,,uint w1nt3r_hp,uint w1nt3r_attack,,,,,) = game.players(w1nt3r);
+
+        require(dhof_hp < 1000 && dhof_hp >= dhof_hp - w1nt3r_attack, "Some damage should have been dealt between 1 - player.attack.");
+        require(w1nt3r_hp < 1000 && w1nt3r_hp >= w1nt3r_hp - dhof_attack, "Some damage should have been dealt between 1 - player.attack.");
+
+        /********* Turn 2 *********/
         // Assume w1nt3r loses and dhof wins
+        bytes32 nonce3 = hex"03";
+        bytes32 nonce4 = hex"04";
+
+        // give dhof insane attack
+        stdstore
+            .target(address(this))
+            .sig("player(address)")
+            .with_key(dhof)
+            .depth(7)
+            .checked_write(999);
+
+        // The Players already occupy the same square, if they both rest() they must battle again.
+        vm.prank(w1nt3r);
+        bytes memory w1nt3rRestAgain = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, w1nt3r)));
+        vm.stopPrank();
+
+        vm.prank(dhof);
+        bytes memory dhofRestAgain = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, dhofRest)));
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 19 hours);
+
+        revealAndResolve(turn, nonce3, nonce4, w1nt3rRestAgain, dhofRestAgain);
+        
         // check spoils transfered
         uint256 loser_spoils = game.spoils(w1nt3r);
         uint256 winner_spoils = game.spoils(dhof);

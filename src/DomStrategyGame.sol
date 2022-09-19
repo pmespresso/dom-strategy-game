@@ -25,6 +25,7 @@ struct Player {
     uint256 y;
     bytes32 pendingMoveCommitment;
     bytes pendingMove;
+    bool inJail;
 }
 
 struct Alliance {
@@ -153,7 +154,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             x: nextAvailableCol,
             y: nextAvailableRow,
             pendingMoveCommitment: bytes32(0),
-            pendingMove: ""
+            pendingMove: "",
+            inJail: false
         });
         spoils[msg.sender] = msg.value;
         players[msg.sender] = player;
@@ -172,9 +174,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         currentTurn = 1;
         currentTurnStartTimestamp = block.timestamp;
 
-        console.log("randomness ", randomness);
-
-        jailCell = [randomness >> 128, randomness & (2**128 - 1)];
+        jailCell = [randomness / 1e75, randomness % 99];
 
         emit TurnStarted(currentTurn, currentTurnStartTimestamp);
     }
@@ -200,6 +200,12 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
+
+        console.log("Commitment");
+        console.logBytes32(commitment);
+        console.log("Proof");
+        console.logBytes32(proof);
+
         require(commitment == proof, "No cheating");
 
         players[msg.sender].pendingMove = data;
@@ -362,9 +368,70 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         emit BattleCommenced(player1Addr, player2Addr);
 
-        requestRandomWords();
+        // take randomness, multiply it against attack to get what % of total attack damange is done to opponent's hp, make it at least 1
+        uint effectiveDamage1 = (player1.attack / (randomness % 99)) + 1;
+        uint effectiveDamage2 = (player2.attack / (randomness % 99)) + 1;
 
+        // There is an importance of who goes first, because if both have an effective damage enough to kill the other, the one who strikes first would win. Leave it to chance. Maybe later leave it to an item/powerup.
+        if (randomness % 2 == 0) {
+            // Case 1: player 1 lost
+            if (player1.hp - effectiveDamage2 <= 0) {
+                // player1 becomes prisoner of war
+                player1.hp = 0;
+                player1.x = jailCell[0];
+                player1.y = jailCell[1];
+                player1.inJail = true;
 
+                // Player 2 takes Player1's spoils
+                (bool sent,) = player2.addr.call{value: spoils[player1.addr]}("");
+                spoils[player2.addr] += spoils[player1.addr];
+                spoils[player1.addr] = 0;
+                require(sent, "Failed to send spoils");
+            } else if (player2.hp - effectiveDamage1 <= 0) {// Case 2: player 2 lost
+                player2.hp = 0;
+                player2.x = jailCell[0];
+                player2.y = jailCell[1];
+                player2.inJail = true;
+
+                // Player 1 takes Player2's spoils
+                (bool sent,) = player1.addr.call{value: spoils[player2.addr]}("");
+                spoils[player1.addr] += spoils[player2.addr];
+                spoils[player2.addr] = 0;
+                require(sent, "Failed to send spoils");
+            } else {
+                player1.hp -= effectiveDamage2;
+                player2.hp -= effectiveDamage1;
+            }
+        } else { // same as above, but player2 goes first
+            if (player2.hp - effectiveDamage1 <= 0) {// Case 2: player 2 lost
+                player2.hp = 0;
+                player2.x = jailCell[0];
+                player2.y = jailCell[1];
+                player2.inJail = true;
+
+                // Player 1 takes Player2's spoils
+                (bool sent,) = player1.addr.call{value: spoils[player2.addr]}("");
+
+                spoils[player1.addr] += spoils[player2.addr];
+                spoils[player2.addr] = 0;
+                require(sent, "Failed to send spoils");
+            } else if (player1.hp - effectiveDamage2 <= 0) {
+                // player1 becomes prisoner of war
+                player1.hp = 0;
+                player1.x = jailCell[0];
+                player1.y = jailCell[1];
+                player1.inJail = true;
+
+                // Player 2 takes Player1's spoils
+                (bool sent,) = player2.addr.call{value: spoils[player1.addr]}("");
+                spoils[player1.addr] += spoils[player2.addr];
+                spoils[player2.addr] = 0;
+                require(sent, "Failed to send spoils");
+            } else {
+                player1.hp -= effectiveDamage2;
+                player2.hp -= effectiveDamage1;
+            }
+        }
     }
 
     // Callbacks
