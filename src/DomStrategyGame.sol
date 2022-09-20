@@ -42,6 +42,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     mapping(uint256 => Alliance) public alliances;
     mapping(uint256 => address) public allianceAdmins;
     mapping(address => uint256) public spoils;
+    mapping(uint256 => mapping(uint256 => address)) public playingField;
 
     // bring your own NFT kinda
     // BAYC, Sappy Seal, Pudgy Penguins, Azuki, Doodles
@@ -157,6 +158,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             pendingMove: "",
             inJail: false
         });
+
+        playingField[nextAvailableRow][nextAvailableCol] = msg.sender;
         spoils[msg.sender] = msg.value;
         players[msg.sender] = player;
         activePlayers += 1;
@@ -279,6 +282,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         require(msg.sender == address(this), "Only via submit/reveal");
         Player storage playa = players[player];
         // Change x & y depending on direction
+        playingField[playa.x][playa.y] = address(0);
         if (direction == 1) { // up
             require(playa.y - 1 > 0, "Cannot move up past the edge.");
             playa.y = playa.y -  1;
@@ -292,6 +296,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             require(playa.x + 1 < fieldSize, "Cannot move right past the edge.");
             playa.x = playa.x + 1;
         }
+        playingField[playa.x][playa.y] = player;
     }
 
     function rest(address player) public {

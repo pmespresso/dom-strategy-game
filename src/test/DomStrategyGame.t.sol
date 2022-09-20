@@ -172,6 +172,8 @@ contract DomStrategyGameTest is Test {
 
         require(x_w1nt3r == 0 && y_w1nt3r == 0, "W1nt3r should have remained in place from rest()");
         require(x_dhof == 3 && y_dhof == 0, "Dhof should have moved right one square from move(4)");
+        require(game.playingField(3, 0) == dhof, "Playing field should record dhof new position");
+        require(game.playingField(0, 0) == w1nt3r, "Playing field should record w1nt3r new position");
         require(hp_dhof == 1000, "W1nt3r should have recovered 2 hp from rest()");
         require(hp_w1nt3r == 1002, "Dhof should have same hp remaining as before from move()");
         require(pendingMoveCommitment_dhof == "" && pendingMoveCommitment_w1nt3r == "", "Pending move commitment for both should be cleared after resolution.");
