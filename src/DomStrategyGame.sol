@@ -25,6 +25,7 @@ struct Player {
     uint256 y;
     bytes32 pendingMoveCommitment;
     bytes pendingMove;
+    bool inJail;
 }
 
 struct Alliance {
@@ -35,12 +36,19 @@ struct Alliance {
     string name;
 }
 
+struct JailCell {
+    uint256 x;
+    uint256 y;
+}
+
 contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     Loot public loot;
+    JailCell public jailCell;
     mapping(address => Player) public players;
     mapping(uint256 => Alliance) public alliances;
     mapping(uint256 => address) public allianceAdmins;
     mapping(address => uint256) public spoils;
+    mapping(uint256 => mapping(uint256 => address)) public playingField;
 
     // bring your own NFT kinda
     // BAYC, Sappy Seal, Pudgy Penguins, Azuki, Doodles
@@ -50,12 +58,14 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     VRFCoordinatorV2Interface immutable COORDINATOR;
     LinkTokenInterface immutable LINKTOKEN;
+    address public winner;
     address public vrf_owner;
-    uint64 public vrf_subscriptionId;
+    address[] inmates;
     bytes32 immutable vrf_keyHash;
-    uint32 immutable vrf_callbackGasLimit = 2_500_000;
     uint16 immutable vrf_requestConfirmations = 3;
+    uint32 immutable vrf_callbackGasLimit = 2_500_000;
     uint32 immutable vrf_numWords = 3;
+    uint64 public vrf_subscriptionId;
     uint256 public randomness;
     uint256 public vrf_requestId;
     uint256 nextAvailableAllianceId = 0;
@@ -66,6 +76,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     // TODO make random to prevent position sniping...?
     uint256 public nextAvailableRow = 0;
     uint256 public nextAvailableCol = 0;
+
+    error LoserTriedWithdraw();
 
     event ReturnedRandomness(uint256[] randomWords);
     event Constructed(address owner, uint64 subscriptionId);
@@ -102,14 +114,18 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         address indexed player
     );
     event Move(address indexed who, uint newX, uint newY);
-
+    event DamageDealt(address indexed by, address indexed to, uint256 indexed amount);
+    event BattleCommenced(address indexed player1, address indexed defender);
+    event BattleFinished(address indexed winner, uint256 indexed spoils);
+    event Winner(address indexed winner);
+    event WinnerWithdrawSpoils(address indexed winner, uint256 indexed spoils);
     constructor(
         Loot _loot,
         address _vrfCoordinator,
         address _linkToken,
         uint64 _subscriptionId,
         bytes32 _keyHash) VRFConsumerBaseV2(_vrfCoordinator)
-    {
+    payable {
         loot = _loot;
         fieldSize = 100;
 
@@ -123,9 +139,18 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         emit Constructed(vrf_owner, vrf_subscriptionId);
     }
 
+    function init() external {
+        requestRandomWords();
+    }
+    
+    // dev only
+    function setPlayingField(uint x, uint y, address addr) public {
+        playingField[x][y] = addr;
+    }
+
     function connect(uint256 tokenId, address byoNft) external payable {
         require(currentTurn == 0, "Already started");
-        require(players[msg.sender].balance == 0, "Already joined");
+        require(spoils[msg.sender] == 0, "Already joined");
         require(msg.value > 0, "Send some eth");
 
         // prove ownership of one of the NFTs in the allowList
@@ -146,8 +171,11 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             x: nextAvailableCol,
             y: nextAvailableRow,
             pendingMoveCommitment: bytes32(0),
-            pendingMove: ""
+            pendingMove: "",
+            inJail: false
         });
+
+        playingField[nextAvailableRow][nextAvailableCol] = msg.sender;
         spoils[msg.sender] = msg.value;
         players[msg.sender] = player;
         activePlayers += 1;
@@ -160,9 +188,13 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     function start() external {
         require(currentTurn == 0, "Already started");
         require(activePlayers > 1, "No players");
+        require(randomness != 0, "Need randomness for jail cell");
 
         currentTurn = 1;
         currentTurnStartTimestamp = block.timestamp;
+
+        jailCell = JailCell({ x: randomness / 1e75, y: randomness % 99});
+        console.log("JailCell: ", jailCell.x, jailCell.y);
 
         emit TurnStarted(currentTurn, currentTurnStartTimestamp);
     }
@@ -198,9 +230,9 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     // who rolls the dice and when?
     function rollDice(uint256 turn) external {
         require(turn == currentTurn, "Stale tx");
-        require(randomness == 0, "Already rolled");
-        require(vrf_requestId == 0, "Already rolling");
-        // require(block.timestamp > currentTurnStartTimestamp + 36 hours);
+        // require(randomness == 0, "Already rolled");
+        // require(vrf_requestId == 0, "Already rolling");
+        // require(block.timestamp > currentTurnStartTimestamp + 18 hours);
 
         requestRandomWords();
     }
@@ -221,11 +253,6 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         for (uint256 i = 0; i < sortedAddrs.length; i++) {
             address addr = sortedAddrs[i];
             Player storage player = players[addr];
-            
-            // TODO: What did w1nt3r intend with sorting the hashed addresses?
-            // bytes32 currentHash = keccak256(abi.encodePacked(addr, randomness));
-            // require(currentHash > lastHash, "Not sorted");
-            // lastHash = currentHash;
 
             (bool success, bytes memory err) = address(this).call(player.pendingMove);
 
@@ -255,25 +282,50 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     /**
         @param direction: 1=up, 2=down, 3=left, 4=right
+        If you try to move into an occupied cell, you need to battle. 
+        If you do enough damage you take their spoils and move into their cell. If you only do some damage but they have hp remaining, you don't move.
      */
-
     function move(address player, int8 direction) public {
         require(msg.sender == address(this), "Only via submit/reveal");
-        Player storage playa = players[player];
+        Player storage jugador = players[player];
+
         // Change x & y depending on direction
         if (direction == 1) { // up
-            require(playa.y - 1 > 0, "Cannot move up past the edge.");
-            playa.y = playa.y -  1;
+            require(jugador.y - 1 >= 0, "Cannot move up past the edge.");
+            if (playingField[jugador.x][jugador.y - 1] != address(0)) {
+                // moving logic based on battle result handled in here
+                _battle(player, playingField[jugador.x][jugador.y - 1]);
+            } else {
+                playingField[jugador.x][jugador.y] = address(0);
+                jugador.y = jugador.y -  1;
+            }
         } else if (direction == 2) { // down
-            require(playa.y + 1 < fieldSize, "Cannot move down past the edge.");
-            playa.y = playa.y + 1;
+            require(jugador.y + 1 < fieldSize, "Cannot move down past the edge.");
+            if (playingField[jugador.x][jugador.y + 1] != address(0)) {
+                _battle(player, playingField[jugador.x][jugador.y + 1]);
+            } else {
+                playingField[jugador.x][jugador.y] = address(0);
+                jugador.y = jugador.y + 1;
+            }
         } else if (direction == 3) { // left
-            require(playa.x - 1 > 0, "Cannot move left past the edge.");
-            playa.x = playa.x - 1;
+            require(jugador.x - 1 > 0, "Cannot move left past the edge.");
+            
+            if (playingField[jugador.x - 1][jugador.y] != address(0)) {
+                _battle(player, playingField[jugador.x - 1][jugador.y]);
+            } else {
+                playingField[jugador.x][jugador.y] = address(0);
+                jugador.x = jugador.x - 1;
+            }
         } else if (direction == 4) { // right
-            require(playa.x + 1 < fieldSize, "Cannot move right past the edge.");
-            playa.x = playa.x + 1;
+            require(jugador.x + 1 < fieldSize, "Cannot move right past the edge.");
+            if (playingField[jugador.x + 1][jugador.y] != address(0)) {
+                _battle(player, playingField[jugador.x + 1][jugador.y]);
+            } else {
+                playingField[jugador.x][jugador.y] = address(0);
+                jugador.x = jugador.x + 1;
+            }
         }
+        playingField[jugador.x][jugador.y] = player;
     }
 
     function rest(address player) public {
@@ -341,6 +393,99 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         emit AllianceMemberLeft(allianceId, player);
     }
+    
+    /**
+        @param attackerAddr the player who initiates the battle by caling move() into the defender's space
+        @param defenderAddr the player who just called rest() minding his own business, or just was unfortunate in the move order, i.e. PlayerA and PlayerB both move to Cell{1,3} but if PlayerA is there first, he will have to defend.
+
+        In reality they both attack each other but the attacker will go first.
+     */
+    function _battle(address attackerAddr, address defenderAddr) internal {
+        require(attackerAddr != defenderAddr, "Cannot fight yourself");
+
+        Player storage attacker = players[attackerAddr];
+        Player storage defender = players[defenderAddr];
+
+        emit BattleCommenced(attackerAddr, defenderAddr);
+
+        // take randomness, multiply it against attack to get what % of total attack damange is done to opponent's hp, make it at least 1
+        uint256 effectiveDamage1 = (attacker.attack / (randomness % 99)) + 1;
+        uint256 effectiveDamage2 = (defender.attack / (randomness % 99)) + 1;
+
+        // Attacker goes first. There is an importance of who goes first, because if both have an effective damage enough to kill the other, the one who strikes first would win.
+       if (int(defender.hp) - int(effectiveDamage1) <= 0) {// Case 2: player 2 lost
+            console.log("Attacker won");
+            // Attacker moves to Defender's old spot
+            attacker.x = defender.x;
+            attacker.y = defender.y;
+            playingField[attacker.x][attacker.y] = attacker.addr;
+
+            // Defender vacates current position
+            playingField[defender.x][defender.y] = address(0);
+            // And then moves to jail
+            defender.hp = 0;
+            defender.x = jailCell.x;
+            defender.y = jailCell.y;
+            defender.inJail = true;
+
+            // Player 1 takes defender's spoils
+            spoils[attacker.addr] += spoils[defender.addr];
+            spoils[defender.addr] = 0;
+
+            activePlayers -= 1;
+
+            if (activePlayers == 1) {
+                // win condition
+                winner = attacker.addr;
+                emit Winner(winner);
+            }
+        } else if (int(attacker.hp) - int(effectiveDamage2) <= 0) {
+            console.log("Defender won");
+            // Defender remains where he is, Attack goes to jail
+
+            // Attacker vacates current position
+            playingField[attacker.x][attacker.y] = address(0);
+            // And moves to jail
+            attacker.hp = 0;
+            attacker.x = jailCell.x;
+            attacker.y = jailCell.y;
+            attacker.inJail = true;
+
+            // Defender takes Attacker's spoils
+            spoils[defender.addr] += spoils[attacker.addr];
+            spoils[attacker.addr] = 0;
+
+            activePlayers -= 1;
+
+            if (activePlayers == 1) {
+                // win condition
+                winner = defender.addr;
+                emit Winner(winner);
+            }
+        } else {
+            console.log("Neither lost");
+            attacker.hp -= effectiveDamage2;
+            defender.hp -= effectiveDamage1;
+        }
+
+        if (attacker.inJail == false) {
+            playingField[attacker.x][attacker.y] = attacker.addr;
+        }
+
+        if (defender.inJail == false) {
+            playingField[defender.x][defender.y] = defender.addr;
+        }
+
+        emit DamageDealt(attacker.addr, defender.addr, effectiveDamage1);
+        emit DamageDealt(defender.addr, attacker.addr, effectiveDamage2);
+    }
+
+    function withdraw() onlyWinner public {
+        (bool sent, ) = winner.call{ value: spoils[winner] }("");
+        require(sent, "Failed to withdraw winnings");
+        spoils[winner] = 0;
+        emit WinnerWithdrawSpoils(winner, spoils[winner]);
+    }
 
     // Callbacks
     function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords)
@@ -358,7 +503,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     * @notice Requests randomness
     * Assumes the subscription is funded sufficiently; "Words" refers to unit of data in Computer Science
     */
-    function requestRandomWords() internal onlyOwner {
+    function requestRandomWords() public onlyOwner {
         // Will revert if subscription is not set and funded.
         vrf_requestId = COORDINATOR.requestRandomWords(
         vrf_keyHash,
@@ -371,6 +516,15 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     modifier onlyOwner() {
         require(msg.sender == vrf_owner);
+        _;
+    }
+
+    modifier onlyWinner() {
+        console.log("msg.sender ", msg.sender);
+        console.log("winner ", winner);
+        if(msg.sender != winner) {
+            revert LoserTriedWithdraw();
+        }
         _;
     }
 

@@ -80,8 +80,17 @@ contract DomStrategyGameTest is Test {
 
         vrfCoordinator.addConsumer(subscriptionId, address(game));
 
+        game.init();
+        vrfCoordinator.fulfillRandomWords(
+            game.vrf_requestId(),
+            address(game)
+        );
+
         vm.deal(w1nt3r, 1 ether);
         vm.deal(dhof, 100 ether);
+
+        console.log("dhof: ", dhof);
+        console.log("w1nt3r: ", w1nt3r);
 
         sortedAddrs[0] = dhof;
         sortedAddrs[1] = w1nt3r;
@@ -103,10 +112,27 @@ contract DomStrategyGameTest is Test {
         vm.stopPrank();
     }
 
+    function revealAndResolve(uint256 turn, bytes32 nonce1,bytes32 nonce2,bytes memory call1, bytes memory call2) public {
+        vm.prank(w1nt3r);
+        game.reveal(turn, nonce1, call1);
+
+        vm.prank(dhof);
+        game.reveal(turn, nonce2, call2);
+
+        game.rollDice(turn);
+        vrfCoordinator.fulfillRandomWords(
+            game.vrf_requestId(),
+            address(game)
+        );
+        
+        game.resolve(turn, sortedAddrs);
+        vm.stopPrank();
+    }
+
     function testConnect() public {
         connect();
-        (,,,,,,,,uint256 x_w1nt3r,uint256 y_w1nt3r,,) = game.players(w1nt3r);
-        (,,,,,,,,uint256 x_dhof,uint256 y_dhof,,) = game.players(dhof);
+        (,,,,,,,,uint256 x_w1nt3r,uint256 y_w1nt3r,,,) = game.players(w1nt3r);
+        (,,,,,,,,uint256 x_dhof,uint256 y_dhof,,,) = game.players(dhof);
 
         require(game.spoils(w1nt3r) > 0, "Cannot play with 0 spoils, pleb.");
         require(game.spoils(dhof) > 0, "Cannot play with 0 spoils, pleb.");
@@ -143,25 +169,15 @@ contract DomStrategyGameTest is Test {
         // every 18 hours all players need to reveal their respective move for that turn.
         vm.warp(block.timestamp + 19 hours);
 
-        vm.prank(w1nt3r);
-        game.reveal(turn, nonce1, call1);
+        revealAndResolve(turn, nonce1, nonce2, call1, call2);
 
-        vm.prank(dhof);
-        game.reveal(turn, nonce2, call2);
-
-        game.rollDice(turn);
-        vrfCoordinator.fulfillRandomWords(
-            game.vrf_requestId(),
-            address(game)
-        );
-        
-        game.resolve(turn, sortedAddrs);
-
-        (,,,,,,uint256 hp_w1nt3r,,uint256 x_w1nt3r,uint256 y_w1nt3r,bytes32 pendingMoveCommitment_w1nt3r,) = game.players(w1nt3r);
-        (,,,,,,uint256 hp_dhof,,uint256 x_dhof,uint256 y_dhof,bytes32 pendingMoveCommitment_dhof,) = game.players(dhof);
+        (,,,,,,uint256 hp_w1nt3r,,uint256 x_w1nt3r,uint256 y_w1nt3r,bytes32 pendingMoveCommitment_w1nt3r,,) = game.players(w1nt3r);
+        (,,,,,,uint256 hp_dhof,,uint256 x_dhof,uint256 y_dhof,bytes32 pendingMoveCommitment_dhof,,) = game.players(dhof);
 
         require(x_w1nt3r == 0 && y_w1nt3r == 0, "W1nt3r should have remained in place from rest()");
         require(x_dhof == 3 && y_dhof == 0, "Dhof should have moved right one square from move(4)");
+        require(game.playingField(3, 0) == dhof, "Playing field should record dhof new position");
+        require(game.playingField(0, 0) == w1nt3r, "Playing field should record w1nt3r new position");
         require(hp_dhof == 1000, "W1nt3r should have recovered 2 hp from rest()");
         require(hp_w1nt3r == 1002, "Dhof should have same hp remaining as before from move()");
         require(pendingMoveCommitment_dhof == "" && pendingMoveCommitment_w1nt3r == "", "Pending move commitment for both should be cleared after resolution.");
@@ -175,7 +191,6 @@ contract DomStrategyGameTest is Test {
         bytes32 nonce2 = hex"02";
 
         game.start();
-
         // dhof
         vm.prank(dhof);
 
@@ -189,23 +204,11 @@ contract DomStrategyGameTest is Test {
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, restCall)));
 
         vm.warp(block.timestamp + 19 hours);
-
-        vm.prank(dhof);
-        game.reveal(turn, nonce1, createAllianceCall);
-
-        vm.prank(w1nt3r);
-        game.reveal(turn, nonce2, restCall);
-
-        game.rollDice(turn);
-        vrfCoordinator.fulfillRandomWords(
-            game.vrf_requestId(),
-            address(game)
-        );
         
-        game.resolve(turn, sortedAddrs);
+        revealAndResolve(turn, nonce2, nonce1, restCall, createAllianceCall);
 
         (address admin, uint256 allianceId, uint256 membersCount, uint256 maxMembersCount,) = game.alliances(0);
-        (,,,,,uint256 allianceId_dhof,,,,,,) = game.players(dhof);
+        (,,,,,uint256 allianceId_dhof,,,,,,,) = game.players(dhof);
 
         require(game.allianceAdmins(allianceId) == dhof && admin == dhof, "Dhof should be the alliance admin.");
         require(allianceId == 0, "First alliance id should be 0");
@@ -231,24 +234,166 @@ contract DomStrategyGameTest is Test {
 
         vm.warp(block.timestamp + 19 hours);
 
-        vm.prank(dhof);
-        game.reveal(turn, nonce3, dhofMoveCall);
-
-        vm.prank(w1nt3r);
-        game.reveal(turn, nonce4, w1nt3rApplyToAllianceCall);
-
-        game.rollDice(turn);
-        vrfCoordinator.fulfillRandomWords(
-            game.vrf_requestId(),
-            address(game)
-        );
-        
-        game.resolve(turn, sortedAddrs);
+        revealAndResolve(turn, nonce4, nonce3, w1nt3rApplyToAllianceCall, dhofMoveCall);
 
         (, , uint256 membersCount_post_join,, ) = game.alliances(0);
-        (,,,,,uint256 allianceId_w1nt3r,,,,,,) = game.players(w1nt3r);
+        (,,,,,uint256 allianceId_w1nt3r,,,,,,,) = game.players(w1nt3r);
 
         require(membersCount_post_join == 2, "Alliance should have 2 members after w1nt3r joins.");
         require(allianceId_w1nt3r == 0, "w1nt3r should be member of alliance 0");
+    }
+
+    function testBattle() public {
+        connect();
+
+        uint256 turn = game.currentTurn() + 1;
+        bytes32 nonce1 = hex"01";
+        bytes32 nonce2 = hex"02";
+
+        game.start();
+
+        /********* Turn 1 *********/
+
+        // w1nt3r
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(w1nt3r)
+            .depth(8)
+            .checked_write(4);
+
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(w1nt3r)
+            .depth(9)
+            .checked_write(5);
+
+        game.setPlayingField(4, 5, w1nt3r);
+        
+        vm.startPrank(w1nt3r);
+        bytes memory w1nt3rMoveUp = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(1));
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, w1nt3rMoveUp)));
+        vm.stopPrank();
+
+        // dhof
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(dhof)
+            .depth(8) // player.x
+            .checked_write(4);
+
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(dhof)
+            .depth(9) // player.y
+            .checked_write(4);
+        
+        game.setPlayingField(4, 4, dhof);
+
+        vm.startPrank(dhof);
+        bytes memory dhofRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, dhofRest)));
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 19 hours);
+
+        revealAndResolve(turn, nonce1, nonce2, w1nt3rMoveUp, dhofRest);
+
+        // Usual
+        // On first contact nobody will die, just damage dealt.
+        // check hp
+        (,,,,,,uint dhof_hp,uint dhof_attack,,,,,) = game.players(dhof);
+        (,,,,,,uint w1nt3r_hp,uint w1nt3r_attack,,,,,) = game.players(w1nt3r);
+
+        // dhof gets +2 for rest
+        require(dhof_hp < 1002 && dhof_hp >= dhof_hp - w1nt3r_attack, "Some damage should have been dealt between 1 - player.attack.");
+        require(w1nt3r_hp < 1000 && w1nt3r_hp >= w1nt3r_hp - dhof_attack, "Some damage should have been dealt between 1 - player.attack.");
+
+        /********* Turn 2 *********/
+        // Assume w1nt3r loses and dhof wins
+        bytes32 nonce3 = hex"03";
+        bytes32 nonce4 = hex"04";
+        turn += 1;
+
+        // give dhof insane attack
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(dhof)
+            .depth(7) // player.attack
+            .checked_write(9000);
+
+        // give w1nt3r shit hp
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(w1nt3r)
+            .depth(6) // player.hp
+            .checked_write(1);
+
+        // w1nt3r didn't manage to kill dhof last round, he moves again to where he thinks dhof again to finish the job.
+        vm.startPrank(w1nt3r);
+        bytes memory w1nt3rMoveUpAgain = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(1));
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, w1nt3rMoveUpAgain)));
+        vm.stopPrank();
+
+        vm.startPrank(dhof);
+        bytes memory dhofRestAgain = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, dhofRest)));
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 19 hours);
+
+        revealAndResolve(turn, nonce3, nonce4, w1nt3rMoveUpAgain, dhofRestAgain);
+        
+        // w1nt3r made a mistake in poking the sleeping lion, he die, give all spoils to dhof
+        uint256 loser_spoils = game.spoils(w1nt3r);
+        uint256 winner_spoils = game.spoils(dhof);
+        require(loser_spoils == 0, "Loser gets all their spoils taken.");
+        require(winner_spoils == 7.9 ether, "Winner gets all the spoils of the defeated.");
+        
+        // Check new positions
+        (,,,,,,,,uint256 x_w1nt3r_after,uint256 y_w1nt3r_after,,,bool isW1nt3rInJail) = game.players(w1nt3r);
+        (,,,,,,,,uint256 x_dhof_after,uint256 y_dhof_after,,,bool isDhofInJail) = game.players(dhof);
+
+        // FIXME: this shit will be a private var in prod so... figure it out
+        (uint jailCellX, uint jailCellY) = game.jailCell();
+
+        // bytes32 jailCellBytes = stdstore
+        //     .target(address(game))
+        //     .sig("jailCell()")
+        //     .read_bytes32();
+
+        // console.logBytes32(jailCellBytes);
+
+        require(x_w1nt3r_after == jailCellX && y_w1nt3r_after == jailCellY && isW1nt3rInJail, "w1nt3r should be in jail");
+        require(game.playingField(4, 4) == dhof, "Dhof (the victor) should be the only one in the previous disputed cell.");
+        require(game.playingField(4, 5) == address(0), "W1nt3r's old position should be empty.");
+        require(x_dhof_after == 4 && y_dhof_after == 4 && isDhofInJail == false, "dhof should be in w1nt3r's old position");
+        // check player count reduced
+        require(game.activePlayers() == 1, "Active player count should be zero.");
+
+        // Check that game ends when only 1 active player remaining, and withdraw becomes available.
+        require(game.winner() == dhof, "Dhof should be declared the winner");
+
+        // Withdraw should become available to Winner only
+        vm.startPrank(w1nt3r);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DomStrategyGame.LoserTriedWithdraw.selector
+            )
+        );
+        game.withdraw();
+        vm.stopPrank();
+        console.log("game.balance", address(game).balance);
+        vm.startPrank(dhof);
+        uint dhofSpoils = game.spoils(dhof);
+        uint dhofCurrBal = address(dhof).balance;
+        game.withdraw();
+        require(dhof.balance == dhofCurrBal + dhofSpoils, "Dhof should get all the spoils.");
+        require(game.spoils(dhof) == 0, "Winner spoils should be zero after withdraw.");
     }
 }
