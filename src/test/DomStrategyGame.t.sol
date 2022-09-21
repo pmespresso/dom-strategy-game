@@ -89,6 +89,9 @@ contract DomStrategyGameTest is Test {
         vm.deal(w1nt3r, 1 ether);
         vm.deal(dhof, 100 ether);
 
+        console.log("dhof: ", dhof);
+        console.log("w1nt3r: ", w1nt3r);
+
         sortedAddrs[0] = dhof;
         sortedAddrs[1] = w1nt3r;
     }
@@ -123,6 +126,7 @@ contract DomStrategyGameTest is Test {
         );
         
         game.resolve(turn, sortedAddrs);
+        vm.stopPrank();
     }
 
     function testConnect() public {
@@ -267,7 +271,7 @@ contract DomStrategyGameTest is Test {
 
         game.setPlayingField(4, 5, w1nt3r);
         
-        vm.prank(w1nt3r);
+        vm.startPrank(w1nt3r);
         bytes memory w1nt3rMoveUp = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(1));
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, w1nt3rMoveUp)));
         vm.stopPrank();
@@ -289,7 +293,7 @@ contract DomStrategyGameTest is Test {
         
         game.setPlayingField(4, 4, dhof);
 
-        vm.prank(dhof);
+        vm.startPrank(dhof);
         bytes memory dhofRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, dhofRest)));
         vm.stopPrank();
@@ -301,13 +305,8 @@ contract DomStrategyGameTest is Test {
         // Usual
         // On first contact nobody will die, just damage dealt.
         // check hp
-        (,,,,,,uint dhof_hp,uint dhof_attack,uint x_dhof_before,uint y_dhof_before,,,) = game.players(dhof);
-        (,,,,,,uint w1nt3r_hp,uint w1nt3r_attack,uint x_w1nt3r_before,uint y_w1nt3r_before,,,) = game.players(w1nt3r);
-
-        console.log("d hp", dhof_hp);
-        console.log("w hp", w1nt3r_hp);
-        console.log("d att", dhof_attack);
-        console.log("w hp", w1nt3r_attack);
+        (,,,,,,uint dhof_hp,uint dhof_attack,,,,,) = game.players(dhof);
+        (,,,,,,uint w1nt3r_hp,uint w1nt3r_attack,,,,,) = game.players(w1nt3r);
 
         // dhof gets +2 for rest
         require(dhof_hp < 1002 && dhof_hp >= dhof_hp - w1nt3r_attack, "Some damage should have been dealt between 1 - player.attack.");
@@ -318,8 +317,6 @@ contract DomStrategyGameTest is Test {
         bytes32 nonce3 = hex"03";
         bytes32 nonce4 = hex"04";
         turn += 1;
-
-        console.log("==== HERE ===== ");
 
         // give dhof insane attack
         stdstore
@@ -338,12 +335,12 @@ contract DomStrategyGameTest is Test {
             .checked_write(1);
 
         // w1nt3r didn't manage to kill dhof last round, he moves again to where he thinks dhof again to finish the job.
-        vm.prank(w1nt3r);
+        vm.startPrank(w1nt3r);
         bytes memory w1nt3rMoveUpAgain = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(1));
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, w1nt3rMoveUpAgain)));
         vm.stopPrank();
 
-        vm.prank(dhof);
+        vm.startPrank(dhof);
         bytes memory dhofRestAgain = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, dhofRest)));
         vm.stopPrank();
@@ -380,7 +377,23 @@ contract DomStrategyGameTest is Test {
         require(game.activePlayers() == 1, "Active player count should be zero.");
 
         // Check that game ends when only 1 active player remaining, and withdraw becomes available.
+        require(game.winner() == dhof, "Dhof should be declared the winner");
 
-
+        // Withdraw should become available to Winner only
+        vm.startPrank(w1nt3r);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DomStrategyGame.LoserTriedWithdraw.selector
+            )
+        );
+        game.withdraw();
+        vm.stopPrank();
+        console.log("game.balance", address(game).balance);
+        vm.startPrank(dhof);
+        uint dhofSpoils = game.spoils(dhof);
+        uint dhofCurrBal = address(dhof).balance;
+        game.withdraw();
+        require(dhof.balance == dhofCurrBal + dhofSpoils, "Dhof should get all the spoils.");
+        require(game.spoils(dhof) == 0, "Winner spoils should be zero after withdraw.");
     }
 }

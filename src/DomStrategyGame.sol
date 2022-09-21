@@ -58,6 +58,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     VRFCoordinatorV2Interface immutable COORDINATOR;
     LinkTokenInterface immutable LINKTOKEN;
+    address public winner;
     address public vrf_owner;
     address[] inmates;
     bytes32 immutable vrf_keyHash;
@@ -75,6 +76,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     // TODO make random to prevent position sniping...?
     uint256 public nextAvailableRow = 0;
     uint256 public nextAvailableCol = 0;
+
+    error LoserTriedWithdraw();
 
     event ReturnedRandomness(uint256[] randomWords);
     event Constructed(address owner, uint64 subscriptionId);
@@ -113,15 +116,16 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     event Move(address indexed who, uint newX, uint newY);
     event DamageDealt(address indexed by, address indexed to, uint256 indexed amount);
     event BattleCommenced(address indexed player1, address indexed defender);
-    event BattleFinished(address indexed winner, uint256 spoils);
-
+    event BattleFinished(address indexed winner, uint256 indexed spoils);
+    event Winner(address indexed winner);
+    event WinnerWithdrawSpoils(address indexed winner, uint256 indexed spoils);
     constructor(
         Loot _loot,
         address _vrfCoordinator,
         address _linkToken,
         uint64 _subscriptionId,
         bytes32 _keyHash) VRFConsumerBaseV2(_vrfCoordinator)
-    {
+    payable {
         loot = _loot;
         fieldSize = 100;
 
@@ -146,7 +150,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     function connect(uint256 tokenId, address byoNft) external payable {
         require(currentTurn == 0, "Already started");
-        require(players[msg.sender].balance == 0, "Already joined");
+        require(spoils[msg.sender] == 0, "Already joined");
         require(msg.value > 0, "Send some eth");
 
         // prove ownership of one of the NFTs in the allowList
@@ -216,13 +220,6 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
-
-        console.log("Commitment");
-        console.logBytes32(commitment);
-
-        console.log("Proof");
-        console.logBytes32(proof);
-
         require(commitment == proof, "No cheating");
 
         players[msg.sender].pendingMove = data;
@@ -280,10 +277,6 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         currentTurn += 1;
         currentTurnStartTimestamp = block.timestamp;
 
-        if (activePlayers == 1) {
-            // win condition
-        }
-
         emit TurnStarted(currentTurn, currentTurnStartTimestamp);
     }
 
@@ -292,7 +285,6 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         If you try to move into an occupied cell, you need to battle. 
         If you do enough damage you take their spoils and move into their cell. If you only do some damage but they have hp remaining, you don't move.
      */
-
     function move(address player, int8 direction) public {
         require(msg.sender == address(this), "Only via submit/reveal");
         Player storage jugador = players[player];
@@ -421,28 +413,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         uint256 effectiveDamage2 = (defender.attack / (randomness % 99)) + 1;
 
         // Attacker goes first. There is an importance of who goes first, because if both have an effective damage enough to kill the other, the one who strikes first would win.
-        if (int(attacker.hp) - int(effectiveDamage2) <= 0) {
-            console.log("Defender won");
-            // Defender remains where he is, Attack goes to jail
-
-            // Attacker vacates current position
-            playingField[attacker.x][attacker.y] = address(0);
-            // And moves to jail
-            attacker.hp = 0;
-            attacker.x = jailCell.x;
-            attacker.y = jailCell.y;
-            attacker.inJail = true;
-
-            // Defender takes Attacker's spoils
-            (bool sent,) = defender.addr.call{value: spoils[attacker.addr]}("");
-            spoils[defender.addr] += spoils[attacker.addr];
-            spoils[attacker.addr] = 0;
-
-            activePlayers -= 1;
-
-            require(sent, "Failed to send spoils");
-        } else if (int(defender.hp) - int(effectiveDamage1) <= 0) {// Case 2: player 2 lost
-            console.log("Defender lost");
+       if (int(defender.hp) - int(effectiveDamage1) <= 0) {// Case 2: player 2 lost
+            console.log("Attacker won");
             // Attacker moves to Defender's old spot
             attacker.x = defender.x;
             attacker.y = defender.y;
@@ -457,13 +429,39 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             defender.inJail = true;
 
             // Player 1 takes defender's spoils
-            (bool sent,) = attacker.addr.call{value: spoils[defender.addr]}("");
-
             spoils[attacker.addr] += spoils[defender.addr];
             spoils[defender.addr] = 0;
 
             activePlayers -= 1;
-            require(sent, "Failed to send spoils");
+
+            if (activePlayers == 1) {
+                // win condition
+                winner = attacker.addr;
+                emit Winner(winner);
+            }
+        } else if (int(attacker.hp) - int(effectiveDamage2) <= 0) {
+            console.log("Defender won");
+            // Defender remains where he is, Attack goes to jail
+
+            // Attacker vacates current position
+            playingField[attacker.x][attacker.y] = address(0);
+            // And moves to jail
+            attacker.hp = 0;
+            attacker.x = jailCell.x;
+            attacker.y = jailCell.y;
+            attacker.inJail = true;
+
+            // Defender takes Attacker's spoils
+            spoils[defender.addr] += spoils[attacker.addr];
+            spoils[attacker.addr] = 0;
+
+            activePlayers -= 1;
+
+            if (activePlayers == 1) {
+                // win condition
+                winner = defender.addr;
+                emit Winner(winner);
+            }
         } else {
             console.log("Neither lost");
             attacker.hp -= effectiveDamage2;
@@ -480,6 +478,13 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         emit DamageDealt(attacker.addr, defender.addr, effectiveDamage1);
         emit DamageDealt(defender.addr, attacker.addr, effectiveDamage2);
+    }
+
+    function withdraw() onlyWinner public {
+        (bool sent, ) = winner.call{ value: spoils[winner] }("");
+        require(sent, "Failed to withdraw winnings");
+        spoils[winner] = 0;
+        emit WinnerWithdrawSpoils(winner, spoils[winner]);
     }
 
     // Callbacks
@@ -511,6 +516,15 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     modifier onlyOwner() {
         require(msg.sender == vrf_owner);
+        _;
+    }
+
+    modifier onlyWinner() {
+        console.log("msg.sender ", msg.sender);
+        console.log("winner ", winner);
+        if(msg.sender != winner) {
+            revert LoserTriedWithdraw();
+        }
         _;
     }
 
