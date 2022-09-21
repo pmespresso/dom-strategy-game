@@ -301,8 +301,8 @@ contract DomStrategyGameTest is Test {
         // Usual
         // On first contact nobody will die, just damage dealt.
         // check hp
-        (,,,,,,uint dhof_hp,uint dhof_attack,,,,,) = game.players(dhof);
-        (,,,,,,uint w1nt3r_hp,uint w1nt3r_attack,,,,,) = game.players(w1nt3r);
+        (,,,,,,uint dhof_hp,uint dhof_attack,uint x_dhof_before,uint y_dhof_before,,,) = game.players(dhof);
+        (,,,,,,uint w1nt3r_hp,uint w1nt3r_attack,uint x_w1nt3r_before,uint y_w1nt3r_before,,,) = game.players(w1nt3r);
 
         console.log("d hp", dhof_hp);
         console.log("w hp", w1nt3r_hp);
@@ -357,10 +357,30 @@ contract DomStrategyGameTest is Test {
         uint256 winner_spoils = game.spoils(dhof);
         require(loser_spoils == 0, "Loser gets all their spoils taken.");
         require(winner_spoils == 7.9 ether, "Winner gets all the spoils of the defeated.");
+        
+        // Check new positions
+        (,,,,,,,,uint256 x_w1nt3r_after,uint256 y_w1nt3r_after,,,bool isW1nt3rInJail) = game.players(w1nt3r);
+        (,,,,,,,,uint256 x_dhof_after,uint256 y_dhof_after,,,bool isDhofInJail) = game.players(dhof);
 
-        // (,,,,,,,,uint256 x_w1nt3r_after,uint256 y_w1nt3r_after,,) = game.players(w1nt3r);
-        // require(x_w1nt3r_after )
+        // FIXME: this shit will be a private var in prod so... figure it out
+        (uint jailCellX, uint jailCellY) = game.jailCell();
+
+        // bytes32 jailCellBytes = stdstore
+        //     .target(address(game))
+        //     .sig("jailCell()")
+        //     .read_bytes32();
+
+        // console.logBytes32(jailCellBytes);
+
+        require(x_w1nt3r_after == jailCellX && y_w1nt3r_after == jailCellY && isW1nt3rInJail, "w1nt3r should be in jail");
+        require(game.playingField(4, 4) == dhof, "Dhof (the victor) should be the only one in the previous disputed cell.");
+        require(game.playingField(4, 5) == address(0), "W1nt3r's old position should be empty.");
+        require(x_dhof_after == 4 && y_dhof_after == 4 && isDhofInJail == false, "dhof should be in w1nt3r's old position");
         // check player count reduced
-        // check only winner occupies the disputed cell after battle
+        require(game.activePlayers() == 1, "Active player count should be zero.");
+
+        // Check that game ends when only 1 active player remaining, and withdraw becomes available.
+
+
     }
 }
