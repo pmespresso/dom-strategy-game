@@ -53,6 +53,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     VRFCoordinatorV2Interface immutable COORDINATOR;
     LinkTokenInterface immutable LINKTOKEN;
     address public vrf_owner;
+    address[] inmates;
     bytes32 immutable vrf_keyHash;
     uint16 immutable vrf_requestConfirmations = 3;
     uint32 immutable vrf_callbackGasLimit = 2_500_000;
@@ -105,6 +106,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         address indexed player
     );
     event Move(address indexed who, uint newX, uint newY);
+    event DamageDealt(address indexed by, address indexed to, uint256 indexed amount);
     event BattleCommenced(address indexed player1, address indexed player2);
     event BattleFinished(address indexed winner, uint256 spoils);
 
@@ -130,6 +132,11 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     function init() external {
         requestRandomWords();
+    }
+    
+    // dev only
+    function setPlayingField(uint x, uint y, address addr) public {
+        playingField[x][y] = addr;
     }
 
     function connect(uint256 tokenId, address byoNft) external payable {
@@ -206,6 +213,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         console.log("Commitment");
         console.logBytes32(commitment);
+
         console.log("Proof");
         console.logBytes32(proof);
 
@@ -242,11 +250,6 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         for (uint256 i = 0; i < sortedAddrs.length; i++) {
             address addr = sortedAddrs[i];
             Player storage player = players[addr];
-            
-            // TODO: What did w1nt3r intend with sorting the hashed addresses?
-            // bytes32 currentHash = keccak256(abi.encodePacked(addr, randomness));
-            // require(currentHash > lastHash, "Not sorted");
-            // lastHash = currentHash;
 
             (bool success, bytes memory err) = address(this).call(player.pendingMove);
 
@@ -276,27 +279,50 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     /**
         @param direction: 1=up, 2=down, 3=left, 4=right
+        If you try to move into an occupied cell, you need to battle. 
+        If you do enough damage you take their spoils and move into their cell. If you only do some damage but they have hp remaining, you don't move.
      */
 
     function move(address player, int8 direction) public {
         require(msg.sender == address(this), "Only via submit/reveal");
-        Player storage playa = players[player];
+        Player storage jugador = players[player];
+
         // Change x & y depending on direction
-        playingField[playa.x][playa.y] = address(0);
         if (direction == 1) { // up
-            require(playa.y - 1 > 0, "Cannot move up past the edge.");
-            playa.y = playa.y -  1;
+            require(jugador.y - 1 >= 0, "Cannot move up past the edge.");
+            console.log("HELLOOO");
+            console.log(playingField[jugador.x][jugador.y - 1]);
+            if (playingField[jugador.x][jugador.y - 1] != address(0)) {
+                // moving logic based on battle result handled in here
+                _battle(player, playingField[jugador.x][jugador.y - 1]);
+            } else {
+                playingField[jugador.x][jugador.y] = address(0);
+                jugador.y = jugador.y -  1;
+            }
         } else if (direction == 2) { // down
-            require(playa.y + 1 < fieldSize, "Cannot move down past the edge.");
-            playa.y = playa.y + 1;
+            require(jugador.y + 1 < fieldSize, "Cannot move down past the edge.");
+            if (playingField[jugador.x][jugador.y + 1] != address(0)) {
+                _battle(player, playingField[jugador.x][jugador.y + 1]);
+            } else {
+                jugador.y = jugador.y + 1;
+            }
         } else if (direction == 3) { // left
-            require(playa.x - 1 > 0, "Cannot move left past the edge.");
-            playa.x = playa.x - 1;
+            require(jugador.x - 1 > 0, "Cannot move left past the edge.");
+            
+            if (playingField[jugador.x - 1][jugador.y] != address(0)) {
+                _battle(player, playingField[jugador.x - 1][jugador.y]);
+            } else {
+                jugador.x = jugador.x - 1;
+            }
         } else if (direction == 4) { // right
-            require(playa.x + 1 < fieldSize, "Cannot move right past the edge.");
-            playa.x = playa.x + 1;
+            require(jugador.x + 1 < fieldSize, "Cannot move right past the edge.");
+            if (playingField[jugador.x + 1][jugador.y] != address(0)) {
+                _battle(player, playingField[jugador.x + 1][jugador.y]);
+            } else {
+                jugador.x = jugador.x + 1;
+            }
         }
-        playingField[playa.x][playa.y] = player;
+        playingField[jugador.x][jugador.y] = player;
     }
 
     function rest(address player) public {
@@ -364,7 +390,6 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         emit AllianceMemberLeft(allianceId, player);
     }
-
     function _battle(address player1Addr, address player2Addr) internal {
         require(player1Addr != player2Addr, "Cannot fight yourself");
 
@@ -374,13 +399,76 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         emit BattleCommenced(player1Addr, player2Addr);
 
         // take randomness, multiply it against attack to get what % of total attack damange is done to opponent's hp, make it at least 1
-        uint effectiveDamage1 = (player1.attack / (randomness % 99)) + 1;
-        uint effectiveDamage2 = (player2.attack / (randomness % 99)) + 1;
+        uint256 effectiveDamage1 = (player1.attack / (randomness % 99)) + 1;
+        uint256 effectiveDamage2 = (player2.attack / (randomness % 99)) + 1;
+
+        console.log("effectiveDamage1: ", effectiveDamage1);
+        
 
         // There is an importance of who goes first, because if both have an effective damage enough to kill the other, the one who strikes first would win. Leave it to chance. Maybe later leave it to an item/powerup.
         if (randomness % 2 == 0) {
             // Case 1: player 1 lost
             if (player1.hp - effectiveDamage2 <= 0) {
+                
+                player2.x = player1.x;
+                player2.y = player1.y;
+                // player1 becomes prisoner of war
+                player1.hp = 0;
+                player1.x = jailCell[0];
+                player1.y = jailCell[1];
+                player1.inJail = true;
+
+                // Player 2 takes Player1's spoils
+                (bool sent,) = player2.addr.call{value: spoils[player1.addr]}("");
+                spoils[player2.addr] += spoils[player1.addr];
+                spoils[player1.addr] = 0;
+
+                require(sent, "Failed to send spoils");
+            } else if (player2.hp - effectiveDamage1 <= 0) {// Case 2: player 2 lost
+                player2.hp = 0;
+                player1.x = player2.x;
+                player1.y = player2.y;
+                // player2 becomes Prisoner of War
+                player2.x = jailCell[0];
+                player2.y = jailCell[1];
+                player2.inJail = true;
+
+                // Player 1 takes Player2's spoils
+                (bool sent,) = player1.addr.call{value: spoils[player2.addr]}("");
+                spoils[player1.addr] += spoils[player2.addr];
+                spoils[player2.addr] = 0;
+                require(sent, "Failed to send spoils");
+            } else {
+                // Nobody lost, nobody move
+                player1.hp -= effectiveDamage2;
+                player2.hp -= effectiveDamage1;
+            }
+        } else { // same as above, but player2 goes first
+            console.log("Player 2 First", player2.hp);
+            console.log("effectiveDamage2: ", effectiveDamage2);
+            if (int(player2.hp) - int(effectiveDamage1) <= 0) {// Case 2: player 2 lost
+                console.log("P2 lost");
+                // Player 1 moves to Player 2's old spot
+                player1.x = player2.x;
+                player1.y = player2.y;
+                // Player 2 moves to jail
+                player2.hp = 0;
+                player2.x = jailCell[0];
+                player2.y = jailCell[1];
+                player2.inJail = true;
+
+                // Player 1 takes Player2's spoils
+                (bool sent,) = player1.addr.call{value: spoils[player2.addr]}("");
+
+                spoils[player1.addr] += spoils[player2.addr];
+                spoils[player2.addr] = 0;
+                require(sent, "Failed to send spoils");
+            } else if (int(player1.hp) - int(effectiveDamage2) <= 0) {
+                console.log("P2 won");
+                // Player 2 moves to Player 1's old spot
+                player2.x = player1.x;
+                player2.y = player1.y;
+
                 // player1 becomes prisoner of war
                 player1.hp = 0;
                 player1.x = jailCell[0];
@@ -392,50 +480,23 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                 spoils[player2.addr] += spoils[player1.addr];
                 spoils[player1.addr] = 0;
                 require(sent, "Failed to send spoils");
-            } else if (player2.hp - effectiveDamage1 <= 0) {// Case 2: player 2 lost
-                player2.hp = 0;
-                player2.x = jailCell[0];
-                player2.y = jailCell[1];
-                player2.inJail = true;
-
-                // Player 1 takes Player2's spoils
-                (bool sent,) = player1.addr.call{value: spoils[player2.addr]}("");
-                spoils[player1.addr] += spoils[player2.addr];
-                spoils[player2.addr] = 0;
-                require(sent, "Failed to send spoils");
             } else {
+                console.log("Neither lost");
                 player1.hp -= effectiveDamage2;
                 player2.hp -= effectiveDamage1;
             }
-        } else { // same as above, but player2 goes first
-            if (player2.hp - effectiveDamage1 <= 0) {// Case 2: player 2 lost
-                player2.hp = 0;
-                player2.x = jailCell[0];
-                player2.y = jailCell[1];
-                player2.inJail = true;
+            console.log("Made it this far");
 
-                // Player 1 takes Player2's spoils
-                (bool sent,) = player1.addr.call{value: spoils[player2.addr]}("");
-
-                spoils[player1.addr] += spoils[player2.addr];
-                spoils[player2.addr] = 0;
-                require(sent, "Failed to send spoils");
-            } else if (player1.hp - effectiveDamage2 <= 0) {
-                // player1 becomes prisoner of war
-                player1.hp = 0;
-                player1.x = jailCell[0];
-                player1.y = jailCell[1];
-                player1.inJail = true;
-
-                // Player 2 takes Player1's spoils
-                (bool sent,) = player2.addr.call{value: spoils[player1.addr]}("");
-                spoils[player1.addr] += spoils[player2.addr];
-                spoils[player2.addr] = 0;
-                require(sent, "Failed to send spoils");
-            } else {
-                player1.hp -= effectiveDamage2;
-                player2.hp -= effectiveDamage1;
+            if (player1.inJail == false) {
+                playingField[player1.x][player1.y] = player1.addr;
             }
+
+            if (player2.inJail == false) {
+                playingField[player2.x][player2.y] = player2.addr;
+            }
+
+            emit DamageDealt(player1.addr, player2.addr, effectiveDamage1);
+            emit DamageDealt(player2.addr, player1.addr, effectiveDamage2);
         }
     }
 

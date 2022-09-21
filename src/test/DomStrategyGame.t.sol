@@ -264,6 +264,8 @@ contract DomStrategyGameTest is Test {
             .with_key(w1nt3r)
             .depth(9)
             .checked_write(5);
+
+        game.setPlayingField(4, 5, w1nt3r);
         
         vm.prank(w1nt3r);
         bytes memory w1nt3rMoveUp = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(1));
@@ -284,6 +286,8 @@ contract DomStrategyGameTest is Test {
             .with_key(dhof)
             .depth(9) // player.y
             .checked_write(4);
+        
+        game.setPlayingField(4, 4, dhof);
 
         vm.prank(dhof);
         bytes memory dhofRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
@@ -300,26 +304,43 @@ contract DomStrategyGameTest is Test {
         (,,,,,,uint dhof_hp,uint dhof_attack,,,,,) = game.players(dhof);
         (,,,,,,uint w1nt3r_hp,uint w1nt3r_attack,,,,,) = game.players(w1nt3r);
 
-        require(dhof_hp < 1000 && dhof_hp >= dhof_hp - w1nt3r_attack, "Some damage should have been dealt between 1 - player.attack.");
+        console.log("d hp", dhof_hp);
+        console.log("w hp", w1nt3r_hp);
+        console.log("d att", dhof_attack);
+        console.log("w hp", w1nt3r_attack);
+
+        // dhof gets +2 for rest
+        require(dhof_hp < 1002 && dhof_hp >= dhof_hp - w1nt3r_attack, "Some damage should have been dealt between 1 - player.attack.");
         require(w1nt3r_hp < 1000 && w1nt3r_hp >= w1nt3r_hp - dhof_attack, "Some damage should have been dealt between 1 - player.attack.");
 
         /********* Turn 2 *********/
         // Assume w1nt3r loses and dhof wins
         bytes32 nonce3 = hex"03";
         bytes32 nonce4 = hex"04";
+        turn += 1;
+
+        console.log("==== HERE ===== ");
 
         // give dhof insane attack
         stdstore
-            .target(address(this))
-            .sig("player(address)")
+            .target(address(game))
+            .sig("players(address)")
             .with_key(dhof)
-            .depth(7)
-            .checked_write(999);
+            .depth(7) // player.attack
+            .checked_write(9000);
 
-        // The Players already occupy the same square, if they both rest() they must battle again.
+        // give w1nt3r shit hp
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(w1nt3r)
+            .depth(6) // player.hp
+            .checked_write(1);
+
+        // w1nt3r didn't manage to kill dhof last round, he moves again to where he thinks dhof again to finish the job.
         vm.prank(w1nt3r);
-        bytes memory w1nt3rRestAgain = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
-        game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, w1nt3r)));
+        bytes memory w1nt3rMoveUpAgain = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(1));
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, w1nt3rMoveUpAgain)));
         vm.stopPrank();
 
         vm.prank(dhof);
@@ -329,9 +350,9 @@ contract DomStrategyGameTest is Test {
 
         vm.warp(block.timestamp + 19 hours);
 
-        revealAndResolve(turn, nonce3, nonce4, w1nt3rRestAgain, dhofRestAgain);
+        revealAndResolve(turn, nonce3, nonce4, w1nt3rMoveUpAgain, dhofRestAgain);
         
-        // check spoils transfered
+        // w1nt3r made a mistake in poking the sleeping lion, he die, give all spoils to dhof
         uint256 loser_spoils = game.spoils(w1nt3r);
         uint256 winner_spoils = game.spoils(dhof);
         require(loser_spoils == 0, "Loser gets all their spoils taken.");
