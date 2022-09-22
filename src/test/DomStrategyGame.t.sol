@@ -2,6 +2,7 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
+import "forge-std/StdJson.sol";
 
 import "./mocks/MockVRFCoordinatorV2.sol";
 import "../../script/HelperConfig.sol";
@@ -39,13 +40,21 @@ contract DomStrategyGameTest is Test {
 
     string mnemonic1 = "test test test test test test test test test test test junk";
     string mnemonic2 = "blind lesson awful swamp borrow rapid snake unique oak blue depart exercise";
+    string mnemonic3 = "ancient spawn mobile flag joy cable measure water crucial blame luggage amateur";
+    string mnemonic4 = "lady teach unveil first caution shine kitten kidney jacket spell carry couple";
+    
     address w1nt3r;
     address dhof;
+    address piskomate;
+    address arthur;
+
     uint256 w1nt3r_pk;
     uint256 dhof_pk;
-
+    uint256 piskomate_pk;
+    uint256 arthur_pk;
     // N.B. this should be done offchain IRL
-    address[] sortedAddrs = new address[](2);
+    address[] sortedAddrs2P = new address[](2);
+    address[] sortedAddrs4P = new address[](4);
 
     HelperConfig helper = new HelperConfig();
     MockVRFCoordinatorV2 vrfCoordinator;
@@ -69,6 +78,12 @@ contract DomStrategyGameTest is Test {
         dhof_pk = vm.deriveKey(mnemonic2, 0);
         dhof = vm.addr(dhof_pk);
 
+        piskomate_pk = vm.deriveKey(mnemonic3, 0);
+        piskomate = vm.addr(piskomate_pk);
+
+        arthur_pk = vm.deriveKey(mnemonic4, 0);
+        arthur = vm.addr(arthur_pk);
+
         vrfCoordinator = new MockVRFCoordinatorV2();
         uint64 subscriptionId = vrfCoordinator.createSubscription();
         uint96 FUND_AMOUNT = 1000 ether;
@@ -88,12 +103,21 @@ contract DomStrategyGameTest is Test {
 
         vm.deal(w1nt3r, 1 ether);
         vm.deal(dhof, 100 ether);
-
+        vm.deal(piskomate, 69 ether);
+        vm.deal(arthur, 1337 ether);
+        
+        console.log("arthur: ", arthur);
+        console.log("piskomate: ", piskomate);
         console.log("dhof: ", dhof);
         console.log("w1nt3r: ", w1nt3r);
 
-        sortedAddrs[0] = dhof;
-        sortedAddrs[1] = w1nt3r;
+        sortedAddrs2P[0] = w1nt3r;
+        sortedAddrs2P[1] = dhof;
+
+        sortedAddrs4P[0] = piskomate;
+        sortedAddrs4P[1] = dhof;
+        sortedAddrs4P[2] = arthur;
+        sortedAddrs4P[3] = w1nt3r;
     }
 
     function connect() public {
@@ -112,11 +136,11 @@ contract DomStrategyGameTest is Test {
         vm.stopPrank();
     }
 
-    function revealAndResolve(uint256 turn, bytes32 nonce1,bytes32 nonce2,bytes memory call1, bytes memory call2) public {
-        vm.prank(w1nt3r);
+    function revealAndResolve2P(uint256 turn, bytes32 nonce1,bytes32 nonce2,bytes memory call1, bytes memory call2) public {
+        vm.prank(sortedAddrs2P[0]);
         game.reveal(turn, nonce1, call1);
 
-        vm.prank(dhof);
+        vm.prank(sortedAddrs2P[1]);
         game.reveal(turn, nonce2, call2);
 
         game.rollDice(turn);
@@ -125,7 +149,7 @@ contract DomStrategyGameTest is Test {
             address(game)
         );
         
-        game.resolve(turn, sortedAddrs);
+        game.resolve(turn, sortedAddrs2P);
         vm.stopPrank();
     }
 
@@ -169,7 +193,7 @@ contract DomStrategyGameTest is Test {
         // every 18 hours all players need to reveal their respective move for that turn.
         vm.warp(block.timestamp + 19 hours);
 
-        revealAndResolve(turn, nonce1, nonce2, call1, call2);
+        revealAndResolve2P(turn, nonce1, nonce2, call1, call2);
 
         (,,,,,,uint256 hp_w1nt3r,,uint256 x_w1nt3r,uint256 y_w1nt3r,bytes32 pendingMoveCommitment_w1nt3r,,) = game.players(w1nt3r);
         (,,,,,,uint256 hp_dhof,,uint256 x_dhof,uint256 y_dhof,bytes32 pendingMoveCommitment_dhof,,) = game.players(dhof);
@@ -205,7 +229,7 @@ contract DomStrategyGameTest is Test {
 
         vm.warp(block.timestamp + 19 hours);
         
-        revealAndResolve(turn, nonce2, nonce1, restCall, createAllianceCall);
+        revealAndResolve2P(turn, nonce2, nonce1, restCall, createAllianceCall);
 
         (address admin, uint256 allianceId, uint256 membersCount, uint256 maxMembersCount,) = game.alliances(0);
         (,,,,,uint256 allianceId_dhof,,,,,,,) = game.players(dhof);
@@ -234,7 +258,7 @@ contract DomStrategyGameTest is Test {
 
         vm.warp(block.timestamp + 19 hours);
 
-        revealAndResolve(turn, nonce4, nonce3, w1nt3rApplyToAllianceCall, dhofMoveCall);
+        revealAndResolve2P(turn, nonce4, nonce3, w1nt3rApplyToAllianceCall, dhofMoveCall);
 
         (, , uint256 membersCount_post_join,, ) = game.alliances(0);
         (,,,,,uint256 allianceId_w1nt3r,,,,,,,) = game.players(w1nt3r);
@@ -300,7 +324,7 @@ contract DomStrategyGameTest is Test {
 
         vm.warp(block.timestamp + 19 hours);
 
-        revealAndResolve(turn, nonce1, nonce2, w1nt3rMoveUp, dhofRest);
+        revealAndResolve2P(turn, nonce1, nonce2, w1nt3rMoveUp, dhofRest);
 
         // Usual
         // On first contact nobody will die, just damage dealt.
@@ -347,7 +371,7 @@ contract DomStrategyGameTest is Test {
 
         vm.warp(block.timestamp + 19 hours);
 
-        revealAndResolve(turn, nonce3, nonce4, w1nt3rMoveUpAgain, dhofRestAgain);
+        revealAndResolve2P(turn, nonce3, nonce4, w1nt3rMoveUpAgain, dhofRestAgain);
         
         // w1nt3r made a mistake in poking the sleeping lion, he die, give all spoils to dhof
         uint256 loser_spoils = game.spoils(w1nt3r);
@@ -396,4 +420,20 @@ contract DomStrategyGameTest is Test {
         require(dhof.balance == dhofCurrBal + dhofSpoils, "Dhof should get all the spoils.");
         require(game.spoils(dhof) == 0, "Winner spoils should be zero after withdraw.");
     }
+
+
+    function testAllianceWinCondition() public {
+        connect();
+
+
+
+    }
+
+
+
+
+
+
+
+
 }
