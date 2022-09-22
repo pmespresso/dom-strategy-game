@@ -377,7 +377,7 @@ contract DomStrategyGameTest is Test {
         require(game.activePlayers() == 1, "Active player count should be zero.");
 
         // Check that game ends when only 1 active player remaining, and withdraw becomes available.
-        require(game.winner() == dhof, "Dhof should be declared the winner");
+        require(game.winnerPlayer() == dhof, "Dhof should be declared the winner");
 
         // Withdraw should become available to Winner only
         vm.startPrank(w1nt3r);
@@ -386,13 +386,13 @@ contract DomStrategyGameTest is Test {
                 DomStrategyGame.LoserTriedWithdraw.selector
             )
         );
-        game.withdraw();
+        game.withdrawWinnerPlayer();
         vm.stopPrank();
         console.log("game.balance", address(game).balance);
         vm.startPrank(dhof);
         uint dhofSpoils = game.spoils(dhof);
         uint dhofCurrBal = address(dhof).balance;
-        game.withdraw();
+        game.withdrawWinnerPlayer();
         require(dhof.balance == dhofCurrBal + dhofSpoils, "Dhof should get all the spoils.");
         require(game.spoils(dhof) == 0, "Winner spoils should be zero after withdraw.");
     }

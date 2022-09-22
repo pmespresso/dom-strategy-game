@@ -46,6 +46,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     JailCell public jailCell;
     mapping(address => Player) public players;
     mapping(uint256 => Alliance) public alliances;
+    mapping(uint256 => address[]) public allianceMembers;
     mapping(uint256 => address) public allianceAdmins;
     mapping(address => uint256) public spoils;
     mapping(uint256 => mapping(uint256 => address)) public playingField;
@@ -58,7 +59,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     VRFCoordinatorV2Interface immutable COORDINATOR;
     LinkTokenInterface immutable LINKTOKEN;
-    address public winner;
+    address public winnerPlayer;
+    uint256 public winnerAllianceId;
     address public vrf_owner;
     address[] inmates;
     bytes32 immutable vrf_keyHash;
@@ -71,13 +73,18 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     uint256 nextAvailableAllianceId = 0;
     uint256 public currentTurn;
     uint256 public currentTurnStartTimestamp;
+    
     uint256 public activePlayers;
+    uint256 public activeAlliances;
+    uint256 public winningTeamSpoils;
+
     uint256 public fieldSize;
     // TODO make random to prevent position sniping...?
     uint256 public nextAvailableRow = 0;
     uint256 public nextAvailableCol = 0;
 
     error LoserTriedWithdraw();
+    error OnlyWinningAllianceMember();
 
     event ReturnedRandomness(uint256[] randomWords);
     event Constructed(address owner, uint64 subscriptionId);
@@ -117,7 +124,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     event DamageDealt(address indexed by, address indexed to, uint256 indexed amount);
     event BattleCommenced(address indexed player1, address indexed defender);
     event BattleFinished(address indexed winner, uint256 indexed spoils);
-    event Winner(address indexed winner);
+    event WinnerPlayer(address indexed winner);
+    event WinnerAlliance(uint indexed allianceId);
     event WinnerWithdrawSpoils(address indexed winner, uint256 indexed spoils);
     constructor(
         Loot _loot,
@@ -361,6 +369,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         });
         alliances[nextAvailableAllianceId] = newAlliance;
         nextAvailableAllianceId += 1;
+        activeAlliances += 1;
 
         emit AllianceCreated(player, nextAvailableAllianceId, name);
     }
@@ -445,13 +454,33 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             // Player 1 takes defender's spoils
             spoils[attacker.addr] += spoils[defender.addr];
             spoils[defender.addr] = 0;
+            
+            // If Loser was in an Alliance
+            if (defender.allianceId != 0) {
+                // Also will need to leave the alliance cuz ded
+                Alliance storage defenderAlliance = alliances[defender.allianceId];
+                defenderAlliance.membersCount -= 1;
+                defender.allianceId = 0;
 
-            activePlayers -= 1;
+                if (defenderAlliance.membersCount == 1) {
+                    // if you're down to one member, ain't no alliance left
+                    activeAlliances -= 1;
+                    activePlayers -= 1;
+                }
 
-            if (activePlayers == 1) {
-                // win condition
-                winner = attacker.addr;
-                emit Winner(winner);
+                if (activeAlliances == 1) {
+                    winnerAllianceId = defenderAlliance.id;
+
+                    emit WinnerAlliance(winnerAllianceId);
+                }
+            } else {
+                activePlayers -= 1;
+
+                if (activePlayers == 1) {
+                    // win condition
+                    winnerPlayer = attacker.addr;
+                    emit WinnerPlayer(winnerPlayer);
+                }
             }
         } else if (int(attacker.hp) - int(effectiveDamage2) <= 0) {
             console.log("Defender won");
@@ -469,12 +498,30 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             spoils[defender.addr] += spoils[attacker.addr];
             spoils[attacker.addr] = 0;
 
-            activePlayers -= 1;
+            if (attacker.allianceId != 0) {
+                // Also will need to leave the alliance cuz ded
+                Alliance storage attackerAlliance = alliances[attacker.allianceId];
+                attackerAlliance.membersCount -= 1;
+                attacker.allianceId = 0;
 
-            if (activePlayers == 1) {
-                // win condition
-                winner = defender.addr;
-                emit Winner(winner);
+                if (attackerAlliance.membersCount == 1) {
+                    // if you're down to one member, ain't no alliance left
+                    activeAlliances -= 1;
+                    activePlayers -= 1;
+                }
+
+                if (activeAlliances == 1) {
+                    winnerAllianceId = attackerAlliance.id;
+                    emit WinnerAlliance(winnerAllianceId);
+                }
+            } else {
+                activePlayers -= 1;
+
+                if (activePlayers == 1) {
+                    // win condition
+                    winnerPlayer = defender.addr;
+                    emit WinnerPlayer(winnerPlayer);
+                }
             }
         } else {
             console.log("Neither lost");
@@ -494,11 +541,35 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         emit DamageDealt(defender.addr, attacker.addr, effectiveDamage2);
     }
 
-    function withdraw() onlyWinner public {
-        (bool sent, ) = winner.call{ value: spoils[winner] }("");
+    function withdrawWinnerAlliance() onlyWinningAllianceMember public {
+        Alliance memory winningAlliance = alliances[winnerAllianceId];
+
+        uint256 myCut = winningTeamSpoils / winningAlliance.membersCount;
+
+        (bool sent, ) = msg.sender.call{ value: myCut }("");
+
+        require(sent, "Failed to withdraw spoils");
+    }
+
+    function withdrawWinnerPlayer() onlyWinner public {
+        (bool sent, ) = winnerPlayer.call{ value: spoils[winnerPlayer] }("");
         require(sent, "Failed to withdraw winnings");
-        spoils[winner] = 0;
-        emit WinnerWithdrawSpoils(winner, spoils[winner]);
+        spoils[winnerPlayer] = 0;
+        emit WinnerWithdrawSpoils(winnerPlayer, spoils[winnerPlayer]);
+    }
+
+    function calcwWnningAllianceSpoils() internal {
+        require(winnerAllianceId != 0);
+        
+        address[] memory winners = allianceMembers[winnerAllianceId];
+
+        uint256 totalSpoils = 0;
+
+        for (uint256 i = 0; i < winners.length; i++) {
+            totalSpoils += spoils[winners[i]];
+        }
+
+        winningTeamSpoils = totalSpoils;
     }
 
     // Callbacks
@@ -533,10 +604,24 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         _;
     }
 
+    modifier onlyWinningAllianceMember() {
+        require(winnerAllianceId != 0, "Only call this if an alliance has won.");
+        
+        address[] memory winners = allianceMembers[winnerAllianceId];
+
+        for(uint i = 0; i < winners.length; i++) {
+            if (winners[i] == msg.sender) {
+                _;
+            }
+        }
+
+        revert OnlyWinningAllianceMember();
+    }
+
     modifier onlyWinner() {
         console.log("msg.sender ", msg.sender);
-        console.log("winner ", winner);
-        if(msg.sender != winner) {
+        console.log("winner ", winnerPlayer);
+        if(msg.sender != winnerPlayer) {
             revert LoserTriedWithdraw();
         }
         _;
