@@ -157,6 +157,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         uint256 nftBalance = IERC721(byoNft).balanceOf(msg.sender);
         require(nftBalance > 0, "You dont own this NFT you liar");
 
+        // TODO: do something with this
         IERC721(byoNft).safeTransferFrom(msg.sender, address(this), tokenId, "");
 
         Player memory player = Player({
@@ -292,16 +293,22 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         // Change x & y depending on direction
         if (direction == 1) { // up
             require(jugador.y - 1 >= 0, "Cannot move up past the edge.");
-            if (playingField[jugador.x][jugador.y - 1] != address(0)) {
+            address currentOccupant = playingField[jugador.x][jugador.y - 1];
+            Player memory defender = players[currentOccupant];
+
+            if (currentOccupant != address(0) && (defender.allianceId != jugador.allianceId || defender.allianceId == 0 || jugador.allianceId == 0)) {
                 // moving logic based on battle result handled in here
-                _battle(player, playingField[jugador.x][jugador.y - 1]);
+                _battle(player, currentOccupant);
             } else {
                 playingField[jugador.x][jugador.y] = address(0);
                 jugador.y = jugador.y -  1;
             }
         } else if (direction == 2) { // down
             require(jugador.y + 1 < fieldSize, "Cannot move down past the edge.");
-            if (playingField[jugador.x][jugador.y + 1] != address(0)) {
+            address currentOccupant = playingField[jugador.x][jugador.y + 1];
+            Player memory defender = players[currentOccupant];
+
+            if (currentOccupant != address(0) && (defender.allianceId != jugador.allianceId || defender.allianceId == 0 || jugador.allianceId == 0)) {
                 _battle(player, playingField[jugador.x][jugador.y + 1]);
             } else {
                 playingField[jugador.x][jugador.y] = address(0);
@@ -309,8 +316,10 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             }
         } else if (direction == 3) { // left
             require(jugador.x - 1 > 0, "Cannot move left past the edge.");
-            
-            if (playingField[jugador.x - 1][jugador.y] != address(0)) {
+            address currentOccupant = playingField[jugador.x - 1][jugador.y];
+            Player memory defender = players[currentOccupant];
+
+            if (currentOccupant != address(0) && (defender.allianceId != jugador.allianceId || defender.allianceId == 0 || jugador.allianceId == 0)) {
                 _battle(player, playingField[jugador.x - 1][jugador.y]);
             } else {
                 playingField[jugador.x][jugador.y] = address(0);
@@ -318,7 +327,10 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             }
         } else if (direction == 4) { // right
             require(jugador.x + 1 < fieldSize, "Cannot move right past the edge.");
-            if (playingField[jugador.x + 1][jugador.y] != address(0)) {
+            address currentOccupant = playingField[jugador.x + 1][jugador.y];
+            Player memory defender = players[currentOccupant];
+
+            if (currentOccupant != address(0) && (defender.allianceId != jugador.allianceId || defender.allianceId == 0 || jugador.allianceId == 0)) {
                 _battle(player, playingField[jugador.x + 1][jugador.y]);
             } else {
                 playingField[jugador.x][jugador.y] = address(0);
@@ -405,6 +417,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         Player storage attacker = players[attackerAddr];
         Player storage defender = players[defenderAddr];
+
+        require(attacker.allianceId == 0 || defender.allianceId == 0 || attacker.allianceId != defender.allianceId, "Allies do not fight");
 
         emit BattleCommenced(attackerAddr, defenderAddr);
 
