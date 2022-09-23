@@ -120,7 +120,7 @@ contract DomStrategyGameTest is Test {
         sortedAddrs4P[3] = w1nt3r;
     }
 
-    function connect() public {
+    function connect2() public {
         vm.startPrank(w1nt3r);
 
         loot.mint(w1nt3r, 1);
@@ -133,6 +133,22 @@ contract DomStrategyGameTest is Test {
         bayc.mint(dhof, 1);
         bayc.setApprovalForAll(address(game), true);
         game.connect{value: 6.9 ether}(1, address(bayc));
+        vm.stopPrank();
+    }
+
+    function connect4() public {
+        connect2();
+        
+        vm.startPrank(piskomate);
+        loot.mint(piskomate, 2);
+        loot.setApprovalForAll(address(game), true);
+        game.connect{value: 1 ether}(1, address(loot));
+        vm.stopPrank();
+
+        vm.startPrank(arthur);
+        loot.mint(arthur, 3);
+        loot.setApprovalForAll(address(game), true);
+        game.connect{value: 1 ether}(1, address(loot));
         vm.stopPrank();
     }
 
@@ -153,8 +169,32 @@ contract DomStrategyGameTest is Test {
         vm.stopPrank();
     }
 
+    function revealAndResolve4P(uint256 turn, bytes32 nonce1,bytes32 nonce2,bytes32 nonce3,bytes32 nonce4, bytes memory call1, bytes memory call2, bytes memory call3, bytes memory call4) public {
+        vm.prank(sortedAddrs4P[0]);
+        game.reveal(turn, nonce1, call1);
+
+        vm.prank(sortedAddrs4P[1]);
+        game.reveal(turn, nonce2, call2);
+
+        vm.prank(sortedAddrs4P[2]);
+        game.reveal(turn, nonce3, call3);
+
+        vm.prank(sortedAddrs4P[3]);
+        game.reveal(turn, nonce4, call4);
+
+        game.rollDice(turn);
+        vrfCoordinator.fulfillRandomWords(
+            game.vrf_requestId(),
+            address(game)
+        );
+        
+        game.resolve(turn, sortedAddrs4P);
+        vm.stopPrank();
+    }
+
+
     function testConnect() public {
-        connect();
+        connect2();
         (,,,,,,,,uint256 x_w1nt3r,uint256 y_w1nt3r,,,) = game.players(w1nt3r);
         (,,,,,,,,uint256 x_dhof,uint256 y_dhof,,,) = game.players(dhof);
 
@@ -166,7 +206,7 @@ contract DomStrategyGameTest is Test {
     }
 
     function testGame() public {
-        connect();
+        connect2();
         
         game.start();
 
@@ -208,7 +248,7 @@ contract DomStrategyGameTest is Test {
     }
 
     function testAlliance() public {
-        connect();
+        connect2();
 
         uint256 turn = game.currentTurn() + 1;
         bytes32 nonce1 = hex"01";
@@ -268,7 +308,7 @@ contract DomStrategyGameTest is Test {
     }
 
     function testBattle() public {
-        connect();
+        connect2();
 
         uint256 turn = game.currentTurn() + 1;
         bytes32 nonce1 = hex"01";
@@ -423,9 +463,51 @@ contract DomStrategyGameTest is Test {
 
 
     function testAllianceWinCondition() public {
-        connect();
+        connect4();
 
+        uint256 turn = game.currentTurn() + 1;
+        bytes32 nonce1 = hex"01";
+        bytes32 nonce2 = hex"02";
+        bytes32 nonce3 = hex"03";
+        bytes32 nonce4 = hex"04";
 
+        game.start();
+
+        /****** Turn 1 ******/
+        
+        vm.startPrank(piskomate);
+        bytes memory piskomateRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, piskomateRest)));
+        vm.stopPrank();
+
+        vm.startPrank(dhof);
+        bytes memory dhofRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, dhofRest)));
+        vm.stopPrank();
+
+        // create alliance
+        vm.startPrank(arthur);
+        bytes memory arthurCreateAlliance = abi.encodeWithSelector(DomStrategyGame.createAlliance.selector, arthur, 5, "Arthur's Eleven");
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, arthurCreateAlliance)));
+        vm.stopPrank();
+        
+        vm.startPrank(w1nt3r);
+        bytes memory w1nt3rRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, w1nt3rRest)));
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 19 hours);
+
+        /****** Turn 2 ******/
+        revealAndResolve4P(turn, nonce1, nonce2, nonce3, nonce4, piskomateRest, dhofRest, arthurCreateAlliance, w1nt3rRest);
+
+        // 3 join the alliance
+
+        // 1 stay out
+
+        // let alliance win
+
+        // make sure alliance splits the spoils evenly
 
     }
 

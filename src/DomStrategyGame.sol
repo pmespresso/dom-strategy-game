@@ -159,19 +159,20 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     function connect(uint256 tokenId, address byoNft) external payable {
         require(currentTurn == 0, "Already started");
         require(spoils[msg.sender] == 0, "Already joined");
+        // TODO: figure out why people would pay variable ETH to connect
         require(msg.value > 0, "Send some eth");
 
         // prove ownership of one of the NFTs in the allowList
         uint256 nftBalance = IERC721(byoNft).balanceOf(msg.sender);
         require(nftBalance > 0, "You dont own this NFT you liar");
 
-        // TODO: do something with this
-        IERC721(byoNft).safeTransferFrom(msg.sender, address(this), tokenId, "");
+        // TODO: for now just verify ownership, later maybe put it up as collateral as the spoils, instead of the ETH balance.
+        // IERC721(byoNft).safeTransferFrom(msg.sender, address(this), tokenId, "");
 
         Player memory player = Player({
             addr: msg.sender,
             nftAddress: byoNft == address(0) ? address(loot) : byoNft,
-            balance: msg.value,
+            balance: msg.value, // balance can be used to buy shit
             tokenId: tokenId,
             lastMoveTimestamp: block.timestamp,
             allianceId: 0,
@@ -229,6 +230,15 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
+
+        console.log("reveal: ", msg.sender);
+
+        console.log("Commitment");
+        console.logBytes32(commitment);
+
+        console.log("Proof");
+        console.logBytes32(proof);
+
         require(commitment == proof, "No cheating");
 
         players[msg.sender].pendingMove = data;
