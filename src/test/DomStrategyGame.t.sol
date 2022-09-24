@@ -247,66 +247,6 @@ contract DomStrategyGameTest is Test {
         require(pendingMoveCommitment_dhof == "" && pendingMoveCommitment_w1nt3r == "", "Pending move commitment for both should be cleared after resolution.");
     }
 
-    function testAlliance() public {
-        connect2();
-
-        uint256 turn = game.currentTurn() + 1;
-        bytes32 nonce1 = hex"01";
-        bytes32 nonce2 = hex"02";
-
-        game.start();
-        // dhof
-        vm.prank(dhof);
-
-        bytes memory createAllianceCall = abi.encodeWithSelector(DomStrategyGame.createAlliance.selector, dhof, 5, "The Dominators");
-
-        game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, createAllianceCall)));
-
-        // w1nt3r
-        vm.prank(w1nt3r);
-        bytes memory restCall = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
-        game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, restCall)));
-
-        vm.warp(block.timestamp + 19 hours);
-        
-        revealAndResolve2P(turn, nonce2, nonce1, restCall, createAllianceCall);
-
-        (address admin, uint256 allianceId, uint256 membersCount, uint256 maxMembersCount,) = game.alliances(0);
-        (,,,,,uint256 allianceId_dhof,,,,,,,) = game.players(dhof);
-
-        require(game.allianceAdmins(allianceId) == dhof && admin == dhof, "Dhof should be the alliance admin.");
-        require(allianceId == 0, "First alliance id should be 0");
-        require(membersCount == 1, "Admin should be the only initial member of alliance");
-        require(maxMembersCount == 5, "Max members count should be as specified by creator");
-        require(allianceId == allianceId_dhof, "Alliance Id should match in Player and Alliance structs (Foreign Key)");
-
-        turn = turn + 1;
-        bytes32 nonce3 = hex"03";
-        bytes32 nonce4 = hex"04";
-
-        vm.prank(dhof);
-        bytes memory dhofMoveCall = abi.encodeWithSelector(DomStrategyGame.move.selector, dhof, int8(2));
-        // Dhof, the admin, must sign the application offchain
-        bytes memory application = abi.encodePacked(turn, allianceId);
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(dhof_pk, keccak256(application));
-        
-        game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, dhofMoveCall)));
-
-        vm.prank(w1nt3r);
-        bytes memory w1nt3rApplyToAllianceCall = abi.encodeWithSelector(DomStrategyGame.joinAlliance.selector, w1nt3r, 0, v, r, s);
-        game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, w1nt3rApplyToAllianceCall)));
-
-        vm.warp(block.timestamp + 19 hours);
-
-        revealAndResolve2P(turn, nonce4, nonce3, w1nt3rApplyToAllianceCall, dhofMoveCall);
-
-        (, , uint256 membersCount_post_join,, ) = game.alliances(0);
-        (,,,,,uint256 allianceId_w1nt3r,,,,,,,) = game.players(w1nt3r);
-
-        require(membersCount_post_join == 2, "Alliance should have 2 members after w1nt3r joins.");
-        require(allianceId_w1nt3r == 0, "w1nt3r should be member of alliance 0");
-    }
-
     function testBattle() public {
         connect2();
 
@@ -461,7 +401,6 @@ contract DomStrategyGameTest is Test {
         require(game.spoils(dhof) == 0, "Winner spoils should be zero after withdraw.");
     }
 
-
     function testAllianceWinCondition() public {
         connect4();
 
@@ -474,6 +413,13 @@ contract DomStrategyGameTest is Test {
         game.start();
 
         /****** Turn 1 ******/
+
+        /**
+            |P| |D| |A| |W| | | |
+            | | | | | | | | | | |
+            | | | | | | | | | | |
+            | | | | | | | | | | |
+         */
         
         vm.startPrank(piskomate);
         bytes memory piskomateRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
@@ -497,25 +443,79 @@ contract DomStrategyGameTest is Test {
         vm.stopPrank();
 
         vm.warp(block.timestamp + 19 hours);
-
-        /****** Turn 2 ******/
+        
         revealAndResolve4P(turn, nonce1, nonce2, nonce3, nonce4, piskomateRest, dhofRest, arthurCreateAlliance, w1nt3rRest);
 
-        // 3 join the alliance
+        /****** Turn 2 ******/
+        uint256 allianceId = 1;
+        turn = turn + 1;
+        bytes32 nonce5 = hex"05";
+        bytes32 nonce6 = hex"06";
+        bytes32 nonce7 = hex"07";
+        bytes32 nonce8 = hex"08";
 
+        (address admin,,,,) = game.alliances(allianceId);
+        console.log("Alliance Admin: ", admin);
+
+        // Piskomate, Dhof join the alliance
+        vm.startPrank(piskomate);
+        bytes memory piskomateApplication = abi.encodePacked(turn, allianceId);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(arthur_pk, keccak256(piskomateApplication));
+        bytes memory piskomateJoin = abi.encodeWithSelector(DomStrategyGame.joinAlliance.selector, piskomate, allianceId, v, r, s);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce5, piskomateJoin)));
+        vm.stopPrank();
+
+        vm.startPrank(dhof);
+        bytes memory dhofApplication = abi.encodePacked(turn, allianceId);
+        (uint8 dhof_v, bytes32 dhof_r, bytes32 dhof_s) = vm.sign(arthur_pk, keccak256(dhofApplication));
+        bytes memory dhofJoin = abi.encodeWithSelector(DomStrategyGame.joinAlliance.selector, dhof, allianceId, dhof_v, dhof_r, dhof_s);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce6, dhofJoin)));
+        vm.stopPrank();
+
+        // Arthur is the creator so he can just rest()
+        vm.startPrank(arthur);
+        bytes memory arthurRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, arthur);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce7, arthurRest)));
+        vm.stopPrank();
+        
         // 1 stay out
+        // W1nt3r doens't join but instead moves in position to attack Arthur
+        vm.startPrank(w1nt3r);
+        bytes memory w1nt3rMove = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(3));
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce8, w1nt3rMove)));
+        vm.stopPrank();
 
-        // let alliance win
+        vm.warp(block.timestamp + 19 hours);
+
+        revealAndResolve4P(turn, nonce5, nonce6, nonce7, nonce8, piskomateJoin, dhofJoin, arthurRest, w1nt3rMove);
+
+        (address allianceAdmin, uint256 arthurAllianceId, uint256 membersCount, uint256 maxMembersCount,) = game.alliances(1);
+
+        require(game.allianceAdmins(allianceId) == arthur && allianceAdmin == arthur, "Arthur should be the alliance admin.");
+        require(membersCount == 3, "There should be 3 members after Pisko, Dhof join Arthur's Alliance.");
+        require(maxMembersCount == 5, "Max members count should be as specified by creator");
+        require(allianceId == arthurAllianceId, "Alliance Id should match in Player and Alliance structs (Foreign Key)");
+
+        (,,,,,uint256 allianceId_w1nt3r,,,,,,,) = game.players(w1nt3r);
+        (,,,,,uint256 allianceId_arthur,,,,,,,) = game.players(arthur);
+        (,,,,,uint256 allianceId_piskomate,,,,,,,) = game.players(piskomate);
+        (,,,,,uint256 allianceId_dhof,,,,,,,) = game.players(dhof);
+
+        require(membersCount == 3, "Alliance should have 3 members after Pisko and Dhof join Arthur's Alliance.");
+        require(allianceId_w1nt3r == 0, "w1nt3r should not be in an alliance");
+        require(allianceId_dhof == 1, "Dhof should be in Alliance#1");
+        require(allianceId_arthur == 1, "Arthur should be in Alliance#1");
+        require(allianceId_piskomate == 1, "Piskomate should be in Alliance#1");
+
+        /****** Turn 3 ******/
+        
+        
+        
+        // let Arthur win, the battle, so his Alliance wins the game
+
+
 
         // make sure alliance splits the spoils evenly
 
     }
-
-
-
-
-
-
-
-
 }

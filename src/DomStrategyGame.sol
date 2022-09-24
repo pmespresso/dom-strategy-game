@@ -70,7 +70,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     uint64 public vrf_subscriptionId;
     uint256 public randomness;
     uint256 public vrf_requestId;
-    uint256 nextAvailableAllianceId = 0;
+    uint256 nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
     uint256 public currentTurn;
     uint256 public currentTurnStartTimestamp;
     
