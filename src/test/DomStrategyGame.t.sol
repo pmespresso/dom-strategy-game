@@ -102,16 +102,16 @@ contract DomStrategyGameTest is Test {
         );
 
         vm.deal(w1nt3r, 1 ether);
-        vm.deal(dhof, 100 ether);
-        vm.deal(piskomate, 69 ether);
-        vm.deal(arthur, 1337 ether);
+        vm.deal(dhof, 6.9 ether);
+        vm.deal(piskomate, 1 ether);
+        vm.deal(arthur, 1 ether);
         
-        console.log("arthur: ", arthur);
         console.log("piskomate: ", piskomate);
         console.log("dhof: ", dhof);
+        console.log("arthur: ", arthur);
         console.log("w1nt3r: ", w1nt3r);
 
-        sortedAddrs2P[0] = w1nt3r;
+        sortedAddrs2P[0] = piskomate;
         sortedAddrs2P[1] = dhof;
 
         sortedAddrs4P[0] = piskomate;
@@ -121,15 +121,13 @@ contract DomStrategyGameTest is Test {
     }
 
     function connect2() public {
-        vm.startPrank(w1nt3r);
-
-        loot.mint(w1nt3r, 1);
+        vm.startPrank(piskomate);
+        loot.mint(piskomate, 2);
         loot.setApprovalForAll(address(game), true);
         game.connect{value: 1 ether}(1, address(loot));
         vm.stopPrank();
 
         vm.startPrank(dhof);
-        
         bayc.mint(dhof, 1);
         bayc.setApprovalForAll(address(game), true);
         game.connect{value: 6.9 ether}(1, address(bayc));
@@ -139,14 +137,14 @@ contract DomStrategyGameTest is Test {
     function connect4() public {
         connect2();
         
-        vm.startPrank(piskomate);
-        loot.mint(piskomate, 2);
+        vm.startPrank(arthur);
+        loot.mint(arthur, 3);
         loot.setApprovalForAll(address(game), true);
         game.connect{value: 1 ether}(1, address(loot));
         vm.stopPrank();
+        vm.startPrank(w1nt3r);
 
-        vm.startPrank(arthur);
-        loot.mint(arthur, 3);
+        loot.mint(w1nt3r, 1);
         loot.setApprovalForAll(address(game), true);
         game.connect{value: 1 ether}(1, address(loot));
         vm.stopPrank();
@@ -195,13 +193,13 @@ contract DomStrategyGameTest is Test {
 
     function testConnect() public {
         connect2();
-        (,,,,,,,,uint256 x_w1nt3r,uint256 y_w1nt3r,,,) = game.players(w1nt3r);
+        (,,,,,,,,uint256 x_piskomate,uint256 y_piskomate,,,) = game.players(piskomate);
         (,,,,,,,,uint256 x_dhof,uint256 y_dhof,,,) = game.players(dhof);
 
-        require(game.spoils(w1nt3r) > 0, "Cannot play with 0 spoils, pleb.");
+        require(game.spoils(piskomate) > 0, "Cannot play with 0 spoils, pleb.");
         require(game.spoils(dhof) > 0, "Cannot play with 0 spoils, pleb.");
         require(address(game).balance == 7.9 ether, "Game contract should escrow all the spoils.");
-        require(x_w1nt3r == 0 && y_w1nt3r == 0, "First connector should occupy (0, 0)");
+        require(x_piskomate == 0 && y_piskomate == 0, "First connector should occupy (0, 0)");
         require(x_dhof == 2 && y_dhof == 0, "Second connector should occupy (2, 0)");
     }
 
@@ -215,10 +213,10 @@ contract DomStrategyGameTest is Test {
         uint256 turn = 1;
 
         // To make a move, you submit a hash of the intended move with the current turn, a nonce, and a call to either move or rest. Everyone's move is collected and then revealed at once after 18 hours
-        vm.prank(w1nt3r);
+        vm.prank(piskomate);
         bytes memory call1 = abi.encodeWithSelector(
             DomStrategyGame.rest.selector,
-            w1nt3r
+            piskomate
         );
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, call1)));
         
@@ -235,16 +233,16 @@ contract DomStrategyGameTest is Test {
 
         revealAndResolve2P(turn, nonce1, nonce2, call1, call2);
 
-        (,,,,,,uint256 hp_w1nt3r,,uint256 x_w1nt3r,uint256 y_w1nt3r,bytes32 pendingMoveCommitment_w1nt3r,,) = game.players(w1nt3r);
+        (,,,,,,uint256 hp_piskomate,,uint256 x_piskomate,uint256 y_piskomate,bytes32 pendingMoveCommitment_piskomate,,) = game.players(piskomate);
         (,,,,,,uint256 hp_dhof,,uint256 x_dhof,uint256 y_dhof,bytes32 pendingMoveCommitment_dhof,,) = game.players(dhof);
 
-        require(x_w1nt3r == 0 && y_w1nt3r == 0, "W1nt3r should have remained in place from rest()");
+        require(x_piskomate == 0 && y_piskomate == 0, "piskomate should have remained in place from rest()");
         require(x_dhof == 3 && y_dhof == 0, "Dhof should have moved right one square from move(4)");
         require(game.playingField(3, 0) == dhof, "Playing field should record dhof new position");
-        require(game.playingField(0, 0) == w1nt3r, "Playing field should record w1nt3r new position");
-        require(hp_dhof == 1000, "W1nt3r should have recovered 2 hp from rest()");
-        require(hp_w1nt3r == 1002, "Dhof should have same hp remaining as before from move()");
-        require(pendingMoveCommitment_dhof == "" && pendingMoveCommitment_w1nt3r == "", "Pending move commitment for both should be cleared after resolution.");
+        require(game.playingField(0, 0) == piskomate, "Playing field should record piskomate new position");
+        require(hp_dhof == 1000, "piskomate should have recovered 2 hp from rest()");
+        require(hp_piskomate == 1002, "Dhof should have same hp remaining as before from move()");
+        require(pendingMoveCommitment_dhof == "" && pendingMoveCommitment_piskomate == "", "Pending move commitment for both should be cleared after resolution.");
     }
 
     function testBattle() public {
@@ -258,26 +256,26 @@ contract DomStrategyGameTest is Test {
 
         /********* Turn 1 *********/
 
-        // w1nt3r
+        // piskomate
         stdstore
             .target(address(game))
             .sig("players(address)")
-            .with_key(w1nt3r)
+            .with_key(piskomate)
             .depth(8)
             .checked_write(4);
 
         stdstore
             .target(address(game))
             .sig("players(address)")
-            .with_key(w1nt3r)
+            .with_key(piskomate)
             .depth(9)
             .checked_write(5);
 
-        game.setPlayingField(4, 5, w1nt3r);
+        game.setPlayingField(4, 5, piskomate);
         
-        vm.startPrank(w1nt3r);
-        bytes memory w1nt3rMoveUp = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(1));
-        game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, w1nt3rMoveUp)));
+        vm.startPrank(piskomate);
+        bytes memory piskomateMoveUp = abi.encodeWithSelector(DomStrategyGame.move.selector, piskomate, int8(1));
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, piskomateMoveUp)));
         vm.stopPrank();
 
         // dhof
@@ -304,20 +302,20 @@ contract DomStrategyGameTest is Test {
 
         vm.warp(block.timestamp + 19 hours);
 
-        revealAndResolve2P(turn, nonce1, nonce2, w1nt3rMoveUp, dhofRest);
+        revealAndResolve2P(turn, nonce1, nonce2, piskomateMoveUp, dhofRest);
 
         // Usual
         // On first contact nobody will die, just damage dealt.
         // check hp
         (,,,,,,uint dhof_hp,uint dhof_attack,,,,,) = game.players(dhof);
-        (,,,,,,uint w1nt3r_hp,uint w1nt3r_attack,,,,,) = game.players(w1nt3r);
+        (,,,,,,uint piskomate_hp,uint piskomate_attack,,,,,) = game.players(piskomate);
 
         // dhof gets +2 for rest
-        require(dhof_hp < 1002 && dhof_hp >= dhof_hp - w1nt3r_attack, "Some damage should have been dealt between 1 - player.attack.");
-        require(w1nt3r_hp < 1000 && w1nt3r_hp >= w1nt3r_hp - dhof_attack, "Some damage should have been dealt between 1 - player.attack.");
+        require(dhof_hp < 1002 && dhof_hp >= dhof_hp - piskomate_attack, "Some damage should have been dealt between 1 - player.attack.");
+        require(piskomate_hp < 1000 && piskomate_hp >= piskomate_hp - dhof_attack, "Some damage should have been dealt between 1 - player.attack.");
 
         /********* Turn 2 *********/
-        // Assume w1nt3r loses and dhof wins
+        // Assume piskomate loses and dhof wins
         bytes32 nonce3 = hex"03";
         bytes32 nonce4 = hex"04";
         turn += 1;
@@ -330,18 +328,18 @@ contract DomStrategyGameTest is Test {
             .depth(7) // player.attack
             .checked_write(9000);
 
-        // give w1nt3r shit hp
+        // give piskomate shit hp
         stdstore
             .target(address(game))
             .sig("players(address)")
-            .with_key(w1nt3r)
+            .with_key(piskomate)
             .depth(6) // player.hp
             .checked_write(1);
 
-        // w1nt3r didn't manage to kill dhof last round, he moves again to where he thinks dhof again to finish the job.
-        vm.startPrank(w1nt3r);
-        bytes memory w1nt3rMoveUpAgain = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(1));
-        game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, w1nt3rMoveUpAgain)));
+        // piskomate didn't manage to kill dhof last round, he moves again to where he thinks dhof again to finish the job.
+        vm.startPrank(piskomate);
+        bytes memory piskomateMoveUpAgain = abi.encodeWithSelector(DomStrategyGame.move.selector, piskomate, int8(1));
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, piskomateMoveUpAgain)));
         vm.stopPrank();
 
         vm.startPrank(dhof);
@@ -351,16 +349,16 @@ contract DomStrategyGameTest is Test {
 
         vm.warp(block.timestamp + 19 hours);
 
-        revealAndResolve2P(turn, nonce3, nonce4, w1nt3rMoveUpAgain, dhofRestAgain);
+        revealAndResolve2P(turn, nonce3, nonce4, piskomateMoveUpAgain, dhofRestAgain);
         
-        // w1nt3r made a mistake in poking the sleeping lion, he die, give all spoils to dhof
-        uint256 loser_spoils = game.spoils(w1nt3r);
+        // piskomate made a mistake in poking the sleeping lion, he die, give all spoils to dhof
+        uint256 loser_spoils = game.spoils(piskomate);
         uint256 winner_spoils = game.spoils(dhof);
         require(loser_spoils == 0, "Loser gets all their spoils taken.");
         require(winner_spoils == 7.9 ether, "Winner gets all the spoils of the defeated.");
         
         // Check new positions
-        (,,,,,,,,uint256 x_w1nt3r_after,uint256 y_w1nt3r_after,,,bool isW1nt3rInJail) = game.players(w1nt3r);
+        (,,,,,,,,uint256 x_piskomate_after,uint256 y_piskomate_after,,,bool isPiskomateInJail) = game.players(piskomate);
         (,,,,,,,,uint256 x_dhof_after,uint256 y_dhof_after,,,bool isDhofInJail) = game.players(dhof);
 
         // FIXME: this shit will be a private var in prod so... figure it out
@@ -373,10 +371,10 @@ contract DomStrategyGameTest is Test {
 
         // console.logBytes32(jailCellBytes);
 
-        require(x_w1nt3r_after == jailCellX && y_w1nt3r_after == jailCellY && isW1nt3rInJail, "w1nt3r should be in jail");
+        require(x_piskomate_after == jailCellX && y_piskomate_after == jailCellY && isPiskomateInJail, "piskomate should be in jail");
         require(game.playingField(4, 4) == dhof, "Dhof (the victor) should be the only one in the previous disputed cell.");
-        require(game.playingField(4, 5) == address(0), "W1nt3r's old position should be empty.");
-        require(x_dhof_after == 4 && y_dhof_after == 4 && isDhofInJail == false, "dhof should be in w1nt3r's old position");
+        require(game.playingField(4, 5) == address(0), "piskomate's old position should be empty.");
+        require(x_dhof_after == 4 && y_dhof_after == 4 && isDhofInJail == false, "dhof should be in piskomate's old position");
         // check player count reduced
         require(game.activePlayers() == 1, "Active player count should be zero.");
 
@@ -384,7 +382,7 @@ contract DomStrategyGameTest is Test {
         require(game.winnerPlayer() == dhof, "Dhof should be declared the winner");
 
         // Withdraw should become available to Winner only
-        vm.startPrank(w1nt3r);
+        vm.startPrank(piskomate);
         vm.expectRevert(
             abi.encodeWithSelector(
                 DomStrategyGame.LoserTriedWithdraw.selector
@@ -508,14 +506,82 @@ contract DomStrategyGameTest is Test {
         require(allianceId_piskomate == 1, "Piskomate should be in Alliance#1");
 
         /****** Turn 3 ******/
+        turn = turn + 1;
+        bytes32 nonce9 = hex"09";
+        bytes32 nonce10 = hex"10";
+        bytes32 nonce11 = hex"11";
+        bytes32 nonce12 = hex"12";
+
+        vm.startPrank(piskomate);
+        bytes memory piskomateRestAgain = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce9, piskomateRestAgain)));
+        vm.stopPrank();
+
+        vm.startPrank(dhof);
+        bytes memory dhofRestAgain = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce10, dhofRestAgain)));
+        vm.stopPrank();
+
+        // give Arthur insane attack
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(arthur)
+            .depth(7) // player.attack
+            .checked_write(9000);
+
+        // give w1nt3r shit hp
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(w1nt3r)
+            .depth(6) // player.hp
+            .checked_write(1);
         
+        // let Arthur win the battle against W1nt3r, so his Alliance wins the game
+        vm.startPrank(arthur);
+        bytes memory arthurMoveAgain = abi.encodeWithSelector(DomStrategyGame.move.selector, arthur, int8(4));
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce11, arthurMoveAgain)));
+        vm.stopPrank();
         
-        
-        // let Arthur win, the battle, so his Alliance wins the game
+        vm.startPrank(w1nt3r);
+        bytes memory w1nt3rRestAgain = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce12, w1nt3rRestAgain)));
+        vm.stopPrank();
 
+        vm.warp(block.timestamp + 19 hours);
+        revealAndResolve4P(turn, nonce9, nonce10, nonce11, nonce12, piskomateRestAgain, dhofRestAgain, arthurMoveAgain, w1nt3rRestAgain);
 
+        // make sure alliance splits the spoils evenly.
+        // TODO: maybe the incentive to put more at stake is that if you win in an alliance you get proportionately more of the total spoils.
+        require(game.winningTeamSpoils() == 9.9 ether, "The total spoils to share should be the sum of all Ether the players put up at stake to connect.");
 
-        // make sure alliance splits the spoils evenly
+        vm.startPrank(arthur);
+        game.withdrawWinnerAlliance();
+        vm.stopPrank();
 
+        vm.startPrank(piskomate);
+        game.withdrawWinnerAlliance();
+        vm.stopPrank();
+
+        vm.startPrank(dhof);
+        game.withdrawWinnerAlliance();
+        vm.stopPrank();
+
+        // each should get 3.3 ether at the end
+        // FIXME: dhof fucking loses ether even though he won. therefore, should make rewards proportional
+        require(arthur.balance == 3.3 ether);
+        require(piskomate.balance == 3.3 ether);
+        require(dhof.balance == 3.3 ether);
+
+        // let each member withdraw their share
+        vm.startPrank(w1nt3r);
+        vm.expectRevert(abi.encodeWithSelector(
+                DomStrategyGame.OnlyWinningAllianceMember.selector
+            ));
+        game.withdrawWinnerAlliance();
+        vm.stopPrank();
+
+        require(w1nt3r.balance == 0 ether);
     }
 }
