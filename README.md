@@ -7,7 +7,7 @@ CC0 - do whatever you want with the source code.
 [Install Foundry](https://book.getfoundry.sh/getting-started/installation) to run the tests.
 
 Started by [@w1nt3r_eth](https://twitter.com/w1nt3r_eth)
-Finished by [@pmespresso](https://twitter.com/piskomate)
+Finished(?) by [@pmespresso](https://github.com/pmespresso)
 
 ## Specs
 
