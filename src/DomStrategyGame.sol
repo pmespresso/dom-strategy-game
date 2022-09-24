@@ -46,6 +46,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     JailCell public jailCell;
     mapping(address => Player) public players;
     mapping(uint256 => Alliance) public alliances;
+    mapping(uint256 => address[]) public allianceMembers;
     mapping(uint256 => address) public allianceAdmins;
     mapping(address => uint256) public spoils;
     mapping(uint256 => mapping(uint256 => address)) public playingField;
@@ -58,7 +59,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     VRFCoordinatorV2Interface immutable COORDINATOR;
     LinkTokenInterface immutable LINKTOKEN;
-    address public winner;
+    address public winnerPlayer;
+    uint256 public winnerAllianceId;
     address public vrf_owner;
     address[] inmates;
     bytes32 immutable vrf_keyHash;
@@ -68,16 +70,21 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     uint64 public vrf_subscriptionId;
     uint256 public randomness;
     uint256 public vrf_requestId;
-    uint256 nextAvailableAllianceId = 0;
+    uint256 nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
     uint256 public currentTurn;
     uint256 public currentTurnStartTimestamp;
+    
     uint256 public activePlayers;
+    uint256 public activeAlliances;
+    uint256 public winningTeamSpoils;
+
     uint256 public fieldSize;
     // TODO make random to prevent position sniping...?
     uint256 public nextAvailableRow = 0;
     uint256 public nextAvailableCol = 0;
 
     error LoserTriedWithdraw();
+    error OnlyWinningAllianceMember();
 
     event ReturnedRandomness(uint256[] randomWords);
     event Constructed(address owner, uint64 subscriptionId);
@@ -117,7 +124,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     event DamageDealt(address indexed by, address indexed to, uint256 indexed amount);
     event BattleCommenced(address indexed player1, address indexed defender);
     event BattleFinished(address indexed winner, uint256 indexed spoils);
-    event Winner(address indexed winner);
+    event WinnerPlayer(address indexed winner);
+    event WinnerAlliance(uint indexed allianceId);
     event WinnerWithdrawSpoils(address indexed winner, uint256 indexed spoils);
     constructor(
         Loot _loot,
@@ -151,18 +159,20 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     function connect(uint256 tokenId, address byoNft) external payable {
         require(currentTurn == 0, "Already started");
         require(spoils[msg.sender] == 0, "Already joined");
+        // TODO: figure out why people would pay variable ETH to connect
         require(msg.value > 0, "Send some eth");
 
         // prove ownership of one of the NFTs in the allowList
         uint256 nftBalance = IERC721(byoNft).balanceOf(msg.sender);
         require(nftBalance > 0, "You dont own this NFT you liar");
 
-        IERC721(byoNft).safeTransferFrom(msg.sender, address(this), tokenId, "");
+        // TODO: for now just verify ownership, later maybe put it up as collateral as the spoils, instead of the ETH balance.
+        // IERC721(byoNft).safeTransferFrom(msg.sender, address(this), tokenId, "");
 
         Player memory player = Player({
             addr: msg.sender,
             nftAddress: byoNft == address(0) ? address(loot) : byoNft,
-            balance: msg.value,
+            balance: msg.value, // balance can be used to buy shit
             tokenId: tokenId,
             lastMoveTimestamp: block.timestamp,
             allianceId: 0,
@@ -178,9 +188,13 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         playingField[nextAvailableRow][nextAvailableCol] = msg.sender;
         spoils[msg.sender] = msg.value;
         players[msg.sender] = player;
+        // every independent player initially gets counted as an alliance, when they join or leave  or die, retally
+        activeAlliances += 1;
         activePlayers += 1;
         nextAvailableCol = (nextAvailableCol + 2) % fieldSize;
         nextAvailableRow = nextAvailableCol == 0 ? nextAvailableRow + 1 : nextAvailableRow;
+
+        console.log(msg.sender, " at ", player.x, player.y);
 
         emit Joined(msg.sender);
     }
@@ -220,6 +234,15 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
+
+        // console.log("reveal: ", msg.sender);
+
+        // console.log("Commitment");
+        // console.logBytes32(commitment);
+
+        // console.log("Proof");
+        // console.logBytes32(proof);
+
         require(commitment == proof, "No cheating");
 
         players[msg.sender].pendingMove = data;
@@ -285,47 +308,57 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         If you try to move into an occupied cell, you need to battle. 
         If you do enough damage you take their spoils and move into their cell. If you only do some damage but they have hp remaining, you don't move.
      */
+     // TODO: surely I can clean this up
     function move(address player, int8 direction) public {
         require(msg.sender == address(this), "Only via submit/reveal");
-        Player storage jugador = players[player];
+        Player storage invader = players[player];
 
         // Change x & y depending on direction
         if (direction == 1) { // up
-            require(jugador.y - 1 >= 0, "Cannot move up past the edge.");
-            if (playingField[jugador.x][jugador.y - 1] != address(0)) {
-                // moving logic based on battle result handled in here
-                _battle(player, playingField[jugador.x][jugador.y - 1]);
+            require(int(invader.y - 1) >= 0, "Cannot move up past the edge.");
+            address currentOccupant = playingField[invader.x][invader.y - 1];
+
+        if (checkIfCanAttack(invader.addr, currentOccupant)) {            
+            // moving logic based on battle result handled in here
+                _battle(player, currentOccupant);
             } else {
-                playingField[jugador.x][jugador.y] = address(0);
-                jugador.y = jugador.y -  1;
+                playingField[invader.x][invader.y] = address(0);
+                invader.y = invader.y -  1;
             }
         } else if (direction == 2) { // down
-            require(jugador.y + 1 < fieldSize, "Cannot move down past the edge.");
-            if (playingField[jugador.x][jugador.y + 1] != address(0)) {
-                _battle(player, playingField[jugador.x][jugador.y + 1]);
+            require(invader.y + 1 < fieldSize, "Cannot move down past the edge.");
+            address currentOccupant = playingField[invader.x][invader.y + 1];
+
+            if (checkIfCanAttack(invader.addr, currentOccupant)) {
+                _battle(player, currentOccupant);
             } else {
-                playingField[jugador.x][jugador.y] = address(0);
-                jugador.y = jugador.y + 1;
+                playingField[invader.x][invader.y] = address(0);
+                invader.y = invader.y + 1;
             }
         } else if (direction == 3) { // left
-            require(jugador.x - 1 > 0, "Cannot move left past the edge.");
-            
-            if (playingField[jugador.x - 1][jugador.y] != address(0)) {
-                _battle(player, playingField[jugador.x - 1][jugador.y]);
+            require(int(invader.x - 1) >= 0, "Cannot move left past the edge.");
+            address currentOccupant = playingField[invader.x - 1][invader.y];
+
+            if (checkIfCanAttack(invader.addr, currentOccupant)) {
+                _battle(player, currentOccupant);
             } else {
-                playingField[jugador.x][jugador.y] = address(0);
-                jugador.x = jugador.x - 1;
+                playingField[invader.x][invader.y] = address(0);
+                invader.x = invader.x - 1;
             }
         } else if (direction == 4) { // right
-            require(jugador.x + 1 < fieldSize, "Cannot move right past the edge.");
-            if (playingField[jugador.x + 1][jugador.y] != address(0)) {
-                _battle(player, playingField[jugador.x + 1][jugador.y]);
+            require(invader.x + 1 < fieldSize, "Cannot move right past the edge.");
+            address currentOccupant = playingField[invader.x + 1][invader.y];
+            console.log("arthur move right but currentOccupant is: ", currentOccupant);
+
+            if (checkIfCanAttack(invader.addr, currentOccupant)) {
+                _battle(player, currentOccupant);
             } else {
-                playingField[jugador.x][jugador.y] = address(0);
-                jugador.x = jugador.x + 1;
+                playingField[invader.x][invader.y] = address(0);
+                invader.x = invader.x + 1;
             }
         }
-        playingField[jugador.x][jugador.y] = player;
+        playingField[invader.x][invader.y] = player;
+        emit Move(invader.addr, invader.x, invader.y);
     }
 
     function rest(address player) public {
@@ -347,6 +380,11 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             maxMembers: maxMembers,
             name: name
         });
+        if (allianceMembers[nextAvailableAllianceId].length > 0) {
+            allianceMembers[nextAvailableAllianceId].push(player);
+        } else {
+            allianceMembers[nextAvailableAllianceId] = [player];
+        }
         alliances[nextAvailableAllianceId] = newAlliance;
         nextAvailableAllianceId += 1;
 
@@ -378,22 +416,91 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         require(alliance.membersCount < alliance.maxMembers - 1, "Cannot exceed max members count.");
 
         alliances[allianceId].membersCount += 1;
+        if (allianceMembers[allianceId].length > 0) {
+            allianceMembers[allianceId].push(player);
+        } else {
+            allianceMembers[allianceId] = [player];
+        }
+        
+        activeAlliances -= 1;
+
+        console.log("joinAlliance()...active alliances: ", activeAlliances);
 
         emit AllianceMemberJoined(players[player].allianceId, player);
     }
 
     function leaveAlliance(address player) public {
         require(msg.sender == address(this), "Only via submit/reveal");
-        require(players[player].allianceId != 0, "Not in alliance");
+        uint256 allianceId = players[player].allianceId;
+        require(allianceId != 0, "Not in alliance");
         require(player != allianceAdmins[players[player].allianceId], "Admin canot leave alliance");
 
-        uint256 allianceId = players[player].allianceId;
         players[player].allianceId = 0;
+        
+        for (uint256 i = 0; i < alliances[allianceId].membersCount; i++) {
+            if (allianceMembers[allianceId][i] == player) {
+                delete allianceMembers[i];
+            }
+        }
+
         alliances[allianceId].membersCount -= 1;
+        activeAlliances += 1;
 
         emit AllianceMemberLeft(allianceId, player);
     }
     
+    function withdrawWinnerAlliance() onlyWinningAllianceMember public {
+        Alliance memory winningAlliance = alliances[winnerAllianceId];
+
+        uint256 myCut = winningTeamSpoils / winningAlliance.membersCount;
+
+        (bool sent, ) = msg.sender.call{ value: myCut }("");
+
+        require(sent, "Failed to withdraw spoils");
+    }
+
+    function withdrawWinnerPlayer() onlyWinner public {
+        (bool sent, ) = winnerPlayer.call{ value: spoils[winnerPlayer] }("");
+        require(sent, "Failed to withdraw winnings");
+        spoils[winnerPlayer] = 0;
+        emit WinnerWithdrawSpoils(winnerPlayer, spoils[winnerPlayer]);
+    }
+
+    /**** Internal Functions *****/
+
+    function calcWinningAllianceSpoils() internal {
+        require(winnerAllianceId != 0);
+        
+        address[] memory winners = allianceMembers[winnerAllianceId];
+
+        console.log("calcWinningAllianceSpoils(): ");
+
+        uint256 totalSpoils = 0;
+
+        for (uint256 i = 0; i < winners.length; i++) {
+            totalSpoils += spoils[winners[i]];
+        }
+
+        winningTeamSpoils = totalSpoils;
+    }
+
+    function checkIfCanAttack(address meAddr, address otherGuyAddr) internal view returns (bool) {
+        Player memory me = players[meAddr];
+        Player memory otherGuy = players[otherGuyAddr];
+
+        if (otherGuyAddr == address(0)) { // other guy is address(0)
+            return false;
+        } else if (otherGuy.allianceId == 0) { // other guy not in an alliance
+            return true;
+        } else if (me.allianceId == otherGuy.allianceId) { // we're in the same alliance
+            return false;
+        } else if (otherGuy.allianceId != me.allianceId) { // the other guy is in some alliance but we're not in the same alliance
+            return true;
+        } else {
+            return false;
+        }
+    }
+
     /**
         @param attackerAddr the player who initiates the battle by caling move() into the defender's space
         @param defenderAddr the player who just called rest() minding his own business, or just was unfortunate in the move order, i.e. PlayerA and PlayerB both move to Cell{1,3} but if PlayerA is there first, he will have to defend.
@@ -405,6 +512,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         Player storage attacker = players[attackerAddr];
         Player storage defender = players[defenderAddr];
+
+        require(attacker.allianceId == 0 || defender.allianceId == 0 || attacker.allianceId != defender.allianceId, "Allies do not fight");
 
         emit BattleCommenced(attackerAddr, defenderAddr);
 
@@ -431,13 +540,44 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             // Player 1 takes defender's spoils
             spoils[attacker.addr] += spoils[defender.addr];
             spoils[defender.addr] = 0;
+            
+            // If Loser was in an Alliance
+            if (defender.allianceId != 0) {
+                // Also will need to leave the alliance cuz ded
+                Alliance storage defenderAlliance = alliances[defender.allianceId];
+                defenderAlliance.membersCount -= 1;
+                defender.allianceId = 0;
 
-            activePlayers -= 1;
+                if (defenderAlliance.membersCount == 1) {
+                    // if you're down to one member, ain't no alliance left
+                    activeAlliances -= 1;
+                    activePlayers -= 1;
+                }
 
-            if (activePlayers == 1) {
-                // win condition
-                winner = attacker.addr;
-                emit Winner(winner);
+                console.log("Defender was in an alliance: ", activeAlliances);
+
+                if (activeAlliances == 1) {
+                    winnerAllianceId = defenderAlliance.id;
+                    calcWinningAllianceSpoils();
+                    emit WinnerAlliance(winnerAllianceId);
+                }
+            } else {
+                activePlayers -= 1;
+                activeAlliances -= 1;
+
+                Alliance storage attackerAlliance = alliances[attacker.allianceId];
+                console.log("Defender was NOT in an alliance: ", activeAlliances);
+                if (activePlayers == 1) {
+                    // win condition
+                    winnerPlayer = attacker.addr;
+                    emit WinnerPlayer(winnerPlayer);
+                }
+
+                if (activeAlliances == 1) {
+                    winnerAllianceId = attackerAlliance.id;
+                    calcWinningAllianceSpoils();
+                    emit WinnerAlliance(winnerAllianceId);
+                }
             }
         } else if (int(attacker.hp) - int(effectiveDamage2) <= 0) {
             console.log("Defender won");
@@ -455,12 +595,31 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             spoils[defender.addr] += spoils[attacker.addr];
             spoils[attacker.addr] = 0;
 
-            activePlayers -= 1;
+            if (attacker.allianceId != 0) {
+                // Also will need to leave the alliance cuz ded
+                Alliance storage attackerAlliance = alliances[attacker.allianceId];
+                attackerAlliance.membersCount -= 1;
+                attacker.allianceId = 0;
 
-            if (activePlayers == 1) {
-                // win condition
-                winner = defender.addr;
-                emit Winner(winner);
+                if (attackerAlliance.membersCount == 1) {
+                    // if you're down to one member, ain't no alliance left
+                    activeAlliances -= 1;
+                    activePlayers -= 1;
+                }
+
+                if (activeAlliances == 1) {
+                    winnerAllianceId = attackerAlliance.id;
+                    calcWinningAllianceSpoils();
+                    emit WinnerAlliance(winnerAllianceId);
+                }
+            } else {
+                activePlayers -= 1;
+
+                if (activePlayers == 1) {
+                    // win condition
+                    winnerPlayer = defender.addr;
+                    emit WinnerPlayer(winnerPlayer);
+                }
             }
         } else {
             console.log("Neither lost");
@@ -478,13 +637,6 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         emit DamageDealt(attacker.addr, defender.addr, effectiveDamage1);
         emit DamageDealt(defender.addr, attacker.addr, effectiveDamage2);
-    }
-
-    function withdraw() onlyWinner public {
-        (bool sent, ) = winner.call{ value: spoils[winner] }("");
-        require(sent, "Failed to withdraw winnings");
-        spoils[winner] = 0;
-        emit WinnerWithdrawSpoils(winner, spoils[winner]);
     }
 
     // Callbacks
@@ -519,10 +671,30 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         _;
     }
 
+    modifier onlyWinningAllianceMember() {
+        require(winnerAllianceId != 0, "Only call this if an alliance has won.");
+        
+        address[] memory winners = allianceMembers[winnerAllianceId];
+
+        bool winnerFound = false;
+
+        for(uint i = 0; i < winners.length; i++) {
+            if (winners[i] == msg.sender) {
+                winnerFound = true;
+            }
+        }
+        
+        if (winnerFound) {
+            _;
+        }  else {
+            revert OnlyWinningAllianceMember();
+        }
+    }
+
     modifier onlyWinner() {
         console.log("msg.sender ", msg.sender);
-        console.log("winner ", winner);
-        if(msg.sender != winner) {
+        console.log("winner ", winnerPlayer);
+        if(msg.sender != winnerPlayer) {
             revert LoserTriedWithdraw();
         }
         _;

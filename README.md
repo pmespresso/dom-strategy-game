@@ -13,8 +13,8 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 
 #### Participating
 
-- [ ] 1 NFT = 1 Player
-- [ ] Pay entry free to create player. Entry fee goes to the player's "spoils," and ETH Balance attached to your player. Game takes nothing.
+- [x] 1 NFT = 1 Player
+- [x] Pay entry free to create player. Entry fee goes to the player's "spoils," and ETH Balance attached to your player. Game takes nothing.
 - [x] If you defeat a player, you win all their accumulated spoils. If you are defeated, you lose all your spoils.
 - [x] Spoils cannot be withdrawn till end of game
 
@@ -28,7 +28,7 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 
 #### Moving
 
-- [ ] Players are initially spawned on 2D grid map in random starting spots. All starting spots are equidistant from one another.
+- [x] Players are initially spawned on 2D grid map in random starting spots. All starting spots are equidistant from one another.
 - [x] You can [MOVE] to one adjacent grid spot per turn. You can also [REST] in the grid spot you currently occupy.
 - [ ] Grid spots can reveal two things the firs time they are encountered:
   - **Resources** which are picked up immediately and can be used to level up and train the character
@@ -39,18 +39,20 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 #### Battles
 
 - [x] When 2 players occupy the same grid slot, a battle occurs. Battles are resolved by a series of calculations (simple comparison of stats like att/def/HP/etc. with rock-paper-sissors specialization) along with a dice roll.
-- [ ] If allies, don't fight
+- [x] If allies, don't fight
 <!-- - Losing player is removed from map, permanently loses spoils to the winner -->
 - [x] Losing player is moved to a "jail" cell, which is hidden from the players (only contract can view)
 - [ ] If someone accidentally lands on the jail cell, they can roll dice to jailbreak (e.g. if their alliance members are in there).
-- [ ] If more than 2 on same grid slot, random 2 are chosen for battle. (**editor's comment**: possibly multiples of 2 can be chosen and the lucky(?) odd one sits out)
+- [ ] If more than 2 on same grid slot, random 2 are chosen for battle.
+- [ ] (**editor's comment**: possibly multiples of 2 can be chosen and the lucky(?) odd one sits out)
 
 #### Alliances
 
 - [x] Players can choose to form alliances or apply to alliances.
 - [x] The player who forms the alliances is the **leader** and has sole rights over accepting or ignoring applications. (**editor's comment**: might be an interesting place to attach a mini-dao like structure to vote in / kick members)
-- [ ] Players in an alliance will not attack each other then occupying the same slot.
-- [ ] If an alliance wins, all of the spoils between the players in the alliance are split evenly (**editors'comment**: are battles fought with a representative of the alliance or the cumulative stats of the alliance?)
+- [x] Players in an alliance will not attack each other then occupying the same slot.
+- [x] If an alliance wins, all of the spoils between the players in the alliance are split evenly
+- [ ] (**editors'comment**: are battles fought with a representative of the alliance or the cumulative stats of the alliance?)
 - [x] Players can only be in 1 alliance
 - [x] Alliances have a max membership count (TBD, based on intended total number of players)
 - [x] N.B. Pseudo "superalliances" can still be formed outside of the game through social contracts or smart contracts. But cannot guarantee there won't be betrayals. (**editor's comment** Strategic/Tactical betrayal is a fun component of any good strategy game :D)
