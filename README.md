@@ -14,9 +14,11 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 #### Participating
 
 - [x] 1 NFT = 1 Player just verify you own a valid NFT to play. This is not part of your spoils
+- [ ] Only certain preapproved NFTs can join (make it elitist to piss ppl off enough to fork it and make their own lol)
 - [x] Pay entry free to create player. Entry fee goes to the player's "spoils," and ETH Balance attached to your player. Game takes nothing.
 - [x] If you defeat a player, you win all their accumulated spoils. If you are defeated, you lose all your spoils.
 - [x] Spoils cannot be withdrawn till end of game
+- [ ] Either the max player limit is reached and `start()` is called automatically, or the `startCountdown` reaches 0 and `start()` is called by the Chainlink Keeper.
 
 #### Turns
 
