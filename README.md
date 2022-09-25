@@ -22,7 +22,8 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 
 #### Turns
 
-- [ ] Turn based, 1 turn every 36 hours (**editor's commment**: 36 hours eh? seems not very engaging...also a game gonna take fucking forever...also will need notifications so 90% of players don't just disappear after a couple moves)
+- [ ] Turn based, 1 turn every 36 hours
+  - [ ] (**editor's commment**: 36 hours eh? seems not very engaging...also a game gonna take fucking forever...also will need notifications so 90% of players don't just disappear after a couple moves)
   - [ ] Submit stage (18 hours): Make your move and submit a hash of it to initiall hide from other players
   - [ ] Reveal stage (18 hours); Submit plaintext version of your move and its password to reveal it
     - [ ] If you don't rewveal your move you are penalized heavily (TBD what is the penalty, needs to outweigh not revealing move)
