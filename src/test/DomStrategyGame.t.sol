@@ -156,7 +156,8 @@ contract DomStrategyGameTest is Test {
 
         vm.prank(sortedAddrs2P[1]);
         game.reveal(turn, nonce2, call2);
-
+        
+        // N.B. roll dice, resolve should be done by Chainlink Keeprs
         game.rollDice(turn);
         vrfCoordinator.fulfillRandomWords(
             game.vrf_requestId(),
@@ -180,6 +181,7 @@ contract DomStrategyGameTest is Test {
         vm.prank(sortedAddrs4P[3]);
         game.reveal(turn, nonce4, call4);
 
+        // N.B. roll dice, resolve should be done by Chainlink Keeprs
         game.rollDice(turn);
         vrfCoordinator.fulfillRandomWords(
             game.vrf_requestId(),

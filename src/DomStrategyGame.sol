@@ -151,7 +151,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         requestRandomWords();
     }
     
-    // dev only
+    // FIXME: dev only (use vm.load)
     function setPlayingField(uint x, uint y, address addr) public {
         playingField[x][y] = addr;
     }
@@ -159,15 +159,13 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     function connect(uint256 tokenId, address byoNft) external payable {
         require(currentTurn == 0, "Already started");
         require(spoils[msg.sender] == 0, "Already joined");
-        // TODO: figure out why people would pay variable ETH to connect
+        // Your share of the spoils if you win as part of an alliance are proportional to how much you paid to connect.
         require(msg.value > 0, "Send some eth");
 
+        // N.B. for now just verify ownership, later maybe put it up as collateral as the spoils, instead of the ETH balance.
         // prove ownership of one of the NFTs in the allowList
         uint256 nftBalance = IERC721(byoNft).balanceOf(msg.sender);
         require(nftBalance > 0, "You dont own this NFT you liar");
-
-        // TODO: for now just verify ownership, later maybe put it up as collateral as the spoils, instead of the ETH balance.
-        // IERC721(byoNft).safeTransferFrom(msg.sender, address(this), tokenId, "");
 
         Player memory player = Player({
             addr: msg.sender,
@@ -194,8 +192,6 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         nextAvailableCol = (nextAvailableCol + 2) % fieldSize;
         nextAvailableRow = nextAvailableCol == 0 ? nextAvailableRow + 1 : nextAvailableRow;
 
-        console.log(msg.sender, " at ", player.x, player.y);
-
         emit Joined(msg.sender);
     }
     // TODO: Somebody needs to call this, maybe make this a Keeper managed Cron job?
@@ -208,7 +204,6 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         currentTurnStartTimestamp = block.timestamp;
 
         jailCell = JailCell({ x: randomness / 1e75, y: randomness % 99});
-        console.log("JailCell: ", jailCell.x, jailCell.y);
 
         emit TurnStarted(currentTurn, currentTurnStartTimestamp);
     }
@@ -235,14 +230,6 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
 
-        // console.log("reveal: ", msg.sender);
-
-        // console.log("Commitment");
-        // console.logBytes32(commitment);
-
-        // console.log("Proof");
-        // console.logBytes32(proof);
-
         require(commitment == proof, "No cheating");
 
         players[msg.sender].pendingMove = data;
@@ -250,12 +237,10 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         emit Revealed(msg.sender, currentTurn, nonce, data);
     }
 
-    // who rolls the dice and when?
+    // N.B. roll dice should be done by Chainlink Keeprs
     function rollDice(uint256 turn) external {
         require(turn == currentTurn, "Stale tx");
-        // require(randomness == 0, "Already rolled");
-        // require(vrf_requestId == 0, "Already rolling");
-        // require(block.timestamp > currentTurnStartTimestamp + 18 hours);
+        require(block.timestamp > currentTurnStartTimestamp + 18 hours);
 
         requestRandomWords();
     }
@@ -266,7 +251,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         require(turn == currentTurn, "Stale tx");
         require(randomness != 0, "Roll the die first");
         require(sortedAddrs.length == activePlayers, "Not enough players");
-        // require(block.timestamp > currentTurnStartTimestamp + 36 hours);
+        require(block.timestamp > currentTurnStartTimestamp + 18 hours);
 
         if (turn % 5 == 0) {
             fieldSize -= 2;
@@ -281,15 +266,24 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
             if (!success) {
                 // Player submitted a bad move
-                // TODO: check underflow, kick if out of spoils
-                player.balance -= 0.05 ether;
-                emit BadMovePenalty(turn, addr, err);
+                if (int(player.balance - 0.05 ether) >= 0) {
+                    player.balance -= 0.05 ether;
+                    emit BadMovePenalty(turn, addr, err);
+                } else {
+                    sendToJail(player);
+                }
             }
 
             // Outside the field, apply storm damage
             if (player.x > fieldSize || player.y > fieldSize) {
-                // TODO: Check for underflow, emit event
-                player.hp -= 10;
+                if (int(player.hp - 10) >= 0) {
+                    player.hp -= 10;
+                    emit DamageDealt(address(this), player.addr, 10);
+                } else {
+                    // if he dies, spoils just get added to the total winningTeamSpoils and he goes to jail
+                    winningTeamSpoils += spoils[player.addr];
+                    sendToJail(player);
+                }
             }
 
             player.pendingMove = "";
@@ -348,7 +342,6 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         } else if (direction == 4) { // right
             require(invader.x + 1 < fieldSize, "Cannot move right past the edge.");
             address currentOccupant = playingField[invader.x + 1][invader.y];
-            console.log("arthur move right but currentOccupant is: ", currentOccupant);
 
             if (checkIfCanAttack(invader.addr, currentOccupant)) {
                 _battle(player, currentOccupant);
@@ -532,10 +525,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             // Defender vacates current position
             playingField[defender.x][defender.y] = address(0);
             // And then moves to jail
-            defender.hp = 0;
-            defender.x = jailCell.x;
-            defender.y = jailCell.y;
-            defender.inJail = true;
+            sendToJail(defender);
 
             // Player 1 takes defender's spoils
             spoils[attacker.addr] += spoils[defender.addr];
@@ -586,10 +576,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             // Attacker vacates current position
             playingField[attacker.x][attacker.y] = address(0);
             // And moves to jail
-            attacker.hp = 0;
-            attacker.x = jailCell.x;
-            attacker.y = jailCell.y;
-            attacker.inJail = true;
+            sendToJail(attacker);
 
             // Defender takes Attacker's spoils
             spoils[defender.addr] += spoils[attacker.addr];
@@ -637,6 +624,13 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         emit DamageDealt(attacker.addr, defender.addr, effectiveDamage1);
         emit DamageDealt(defender.addr, attacker.addr, effectiveDamage2);
+    }
+
+    function sendToJail(Player storage player) internal {
+        player.hp = 0;
+        player.x = jailCell.x;
+        player.y = jailCell.y;
+        player.inJail = true;
     }
 
     // Callbacks
