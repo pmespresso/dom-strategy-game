@@ -13,10 +13,12 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 
 #### Participating
 
-- [x] 1 NFT = 1 Player
+- [x] 1 NFT = 1 Player just verify you own a valid NFT to play. This is not part of your spoils
+- [ ] Only certain preapproved NFTs can join (make it elitist to piss ppl off enough to fork it and make their own lol)
 - [x] Pay entry free to create player. Entry fee goes to the player's "spoils," and ETH Balance attached to your player. Game takes nothing.
 - [x] If you defeat a player, you win all their accumulated spoils. If you are defeated, you lose all your spoils.
 - [x] Spoils cannot be withdrawn till end of game
+- [ ] Either the max player limit is reached and `start()` is called automatically, or the `startCountdown` reaches 0 and `start()` is called by the Chainlink Keeper.
 
 #### Turns
 
@@ -24,7 +26,7 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
   - [ ] Submit stage (18 hours): Make your move and submit a hash of it to initiall hide from other players
   - [ ] Reveal stage (18 hours); Submit plaintext version of your move and its password to reveal it
     - [ ] If you don't rewveal your move you are penalized heavily (TBD what is the penalty, needs to outweigh not revealing move)
-  - [x] Resolution (instant-ish): All moves are process, and next submit stage begins
+  - [ ] Resolution (instant-ish): All moves are process, and next submit stage begins (Chainlink Keeper calls `rollDice()` then `resolve()` every 18 hours)
 
 #### Moving
 
@@ -51,7 +53,7 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 - [x] Players can choose to form alliances or apply to alliances.
 - [x] The player who forms the alliances is the **leader** and has sole rights over accepting or ignoring applications. (**editor's comment**: might be an interesting place to attach a mini-dao like structure to vote in / kick members)
 - [x] Players in an alliance will not attack each other then occupying the same slot.
-- [x] If an alliance wins, all of the spoils between the players in the alliance are split evenly
+- [ ] If an alliance wins, all of the spoils between the players in the alliance are split proportionately to what they put up at stake.
 - [ ] (**editors'comment**: are battles fought with a representative of the alliance or the cumulative stats of the alliance?)
 - [x] Players can only be in 1 alliance
 - [x] Alliances have a max membership count (TBD, based on intended total number of players)
@@ -60,11 +62,13 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 #### Win Condition
 
 - [x] Last player
-- [ ] Last alliance standing
+- [x] Last alliance standing
 - [x] At this point the winers may withdraw their spoils
 - [ ] (**editor's comment**: In order to add more chaos and tact in choosing your allies, if an alliance is the last standing, they could anonymously vote to continue as FFA, or be satisfied with splitting the spoils.)
 
 #### Miscellaneous
 
-- [ ] Every 5 turns (a little over a week), the play field is reduced in size (Battle Royale/Fortnite,Warzone, etc.) to force more battles over time and push towards a win.
+- [x] Every 5 turns (a little over a week), the play field is reduced in size (Battle Royale/Fortnite,Warzone, etc.) to force more battles over time and push towards a win.
+- [x] Every time a player submits a bad move, they are penalized byy 0.05 ether until they cannot pay anymore at which point they are sent to jail.
+- [ ]
 - [ ] Items places randomly along the grid could power up attributes like hp or attack and even allow teleport
