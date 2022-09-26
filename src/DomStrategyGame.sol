@@ -62,7 +62,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     address public winnerPlayer;
     uint256 public winnerAllianceId;
     address public vrf_owner;
-    address[] inmates;
+    address[] public inmates;
     address[] activePlayers;
     bytes32 immutable vrf_keyHash;
     uint16 immutable vrf_requestConfirmations = 3;
@@ -130,6 +130,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     event WinnerPlayer(address indexed winner);
     event WinnerAlliance(uint indexed allianceId);
     event WinnerWithdrawSpoils(address indexed winner, uint256 indexed spoils);
+    event Jail(address indexed who, uint256 indexed inmatesCount);
+
     constructor(
         Loot _loot,
         address _vrfCoordinator,
@@ -269,11 +271,19 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
             Player storage player = players[addr];
 
-            // If player straight up didn't reveal, then confiscate their NFT
-            if (player.pendingMove.length == 0) {
+            // If you're in jail you no longer get to do shit. Just hope somebody breaks you out.
+            if (player.inJail) {
+                continue;
+            }
+            
+            // If player straight up didn't submit then confiscate their NFT
+            if (player.pendingMoveCommitment == bytes32(0)) {
                 IERC721(player.nftAddress).safeTransferFrom(player.addr, address(this), player.tokenId, "");
 
                 emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
+            } else if (player.pendingMoveCommitment != bytes32(0) && player.pendingMove.length == 0) { // If player submitted but forgot to reveal, move them to jail
+                sendToJail(player);
+                // if you are in jail but your alliance wins, you still get a cut of the spoils
             }
 
             (bool success, bytes memory err) = address(this).call(player.pendingMove);
@@ -282,6 +292,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                 // Player submitted a bad move
                 if (int(player.balance - 0.05 ether) >= 0) {
                     player.balance -= 0.05 ether;
+                    spoils[player.addr] == player.balance;
                     emit BadMovePenalty(turn, player.addr, err);
                 } else {
                     sendToJail(player);
@@ -316,7 +327,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         If you try to move into an occupied cell, you need to battle. 
         If you do enough damage you take their spoils and move into their cell. If you only do some damage but they have hp remaining, you don't move.
      */
-     // TODO: surely I can clean this up
+     // TODO: surely this can be cleaner
     function move(address player, int8 direction) public {
         require(msg.sender == address(this), "Only via submit/reveal");
         Player storage invader = players[player];
@@ -645,6 +656,9 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         player.x = jailCell.x;
         player.y = jailCell.y;
         player.inJail = true;
+        inmates.push(player.addr);
+
+        emit Jail(player.addr, inmates.length);
     }
 
     // Callbacks

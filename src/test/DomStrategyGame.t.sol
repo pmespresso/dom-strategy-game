@@ -247,6 +247,61 @@ contract DomStrategyGameTest is Test {
         require(pendingMoveCommitment_dhof == "" && pendingMoveCommitment_piskomate == "", "Pending move commitment for both should be cleared after resolution.");
     }
 
+    function testNoRevealOrNoSubmitPenalty() public {
+        connect2();
+
+        game.start();
+
+        bytes32 nonce1 = hex"01";
+        bytes32 nonce2 = hex"02";
+        uint256 turn = 1;
+
+        vm.prank(piskomate);
+        bytes memory call1 = abi.encodeWithSelector(
+            DomStrategyGame.rest.selector,
+            piskomate
+        );
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, call1)));
+
+        // Let's say dhof submits then doesn't reveal        
+        vm.prank(dhof);
+        bytes memory call2 = abi.encodeWithSelector(
+            DomStrategyGame.move.selector,
+            dhof,
+            int8(4)
+        );
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, call2)));
+
+        vm.warp(block.timestamp + 19 hours);
+
+        vm.prank(piskomate);
+        game.reveal(turn, nonce1, call1);
+
+        // Dhof doesn't reveal....
+
+        game.rollDice(turn);
+        vrfCoordinator.fulfillRandomWords(
+            game.vrf_requestId(),
+            address(game)
+        );
+        
+        game.resolve(turn);
+        address inmate0 = game.inmates(0);
+
+        require(inmate0 == dhof, "Dhof should be sent to jail since he didn't reveal");
+
+        (,,,,,,uint256 hp,, uint256 x, uint256 y,,,bool inJail) = game.players(dhof);
+        (uint256  jailX, uint256 jailY) = game.jailCell();
+
+        require(hp == 0, "Dhof hp should be 0 in jail.");
+        require(jailX == x && jailY == y && inJail == true, "Dhof position should be jail cell.");
+
+        /// no Submit then confiscate
+
+        // require(bayc.balanceOf(dhof) == 0, "Dhof should no longer have his ape");
+        // require(bayc.balanceOf(address(game)) == 1, "The Game should now have Dhof's ape");
+    }
+
     function testBattle() public {
         connect2();
 
