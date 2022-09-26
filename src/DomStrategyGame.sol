@@ -73,7 +73,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     uint256 nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
     uint256 public currentTurn;
     uint256 public currentTurnStartTimestamp;
-    
+    uint256 public constant maxPlayers = 100;
     uint256 public activePlayers;
     uint256 public activeAlliances;
     uint256 public winningTeamSpoils;
@@ -135,7 +135,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         bytes32 _keyHash) VRFConsumerBaseV2(_vrfCoordinator)
     payable {
         loot = _loot;
-        fieldSize = 100;
+        fieldSize = maxPlayers; // also the max players
 
         // VRF
         COORDINATOR = VRFCoordinatorV2Interface(_vrfCoordinator);
