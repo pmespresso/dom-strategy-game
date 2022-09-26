@@ -121,10 +121,12 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         uint256 indexed allianceId,
         address indexed player
     );
-    event Move(address indexed who, uint newX, uint newY);
-    event DamageDealt(address indexed by, address indexed to, uint256 indexed amount);
+    
     event BattleCommenced(address indexed player1, address indexed defender);
     event BattleFinished(address indexed winner, uint256 indexed spoils);
+    event DamageDealt(address indexed by, address indexed to, uint256 indexed amount);
+    event Move(address indexed who, uint newX, uint newY);
+    event NftConfiscated(address indexed who, address indexed nftAddress, uint256 indexed tokenId);
     event WinnerPlayer(address indexed winner);
     event WinnerAlliance(uint indexed allianceId);
     event WinnerWithdrawSpoils(address indexed winner, uint256 indexed spoils);
@@ -214,6 +216,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     function submit(uint256 turn, bytes32 commitment) external {
         require(currentTurn > 0, "Not started");
         require(turn == currentTurn, "Stale tx");
+        // submit stage is 18 hours
         require(block.timestamp <= currentTurnStartTimestamp + 18 hours);
 
         players[msg.sender].pendingMoveCommitment = commitment;
@@ -227,6 +230,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         bytes calldata data
     ) external {
         require(turn == currentTurn, "Stale tx");
+        // then another 18 hours for the reveal stage
         require(block.timestamp > currentTurnStartTimestamp + 18 hours);
         require(block.timestamp < currentTurnStartTimestamp + 36 hours);
 
@@ -264,6 +268,13 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             address addr = activePlayers[i];
 
             Player storage player = players[addr];
+
+            // If player straight up didn't reveal, then confiscate their NFT
+            if (player.pendingMove.length == 0) {
+                IERC721(player.nftAddress).safeTransferFrom(player.addr, address(this), player.tokenId, "");
+
+                emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
+            }
 
             (bool success, bytes memory err) = address(this).call(player.pendingMove);
 
