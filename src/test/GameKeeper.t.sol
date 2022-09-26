@@ -2,20 +2,48 @@
 
 pragma solidity ^0.8.0;
 
+import "../../script/HelperConfig.sol";
+import "./mocks/MockVRFCoordinatorV2.sol";
+import "../Loot.sol";
+import "../DomStrategyGame.sol";
 import "../GameKeeper.sol";
 import "forge-std/console.sol";
 import "forge-std/Test.sol";
 import "forge-std/Vm.sol";
 
 contract GameKeeperTest is Test {
+    DomStrategyGame public game;
     GameKeeper public gameKeeper;
+    MockVRFCoordinatorV2 vrfCoordinator;
+    HelperConfig helper = new HelperConfig();
+    Loot public loot;
     uint256 public staticTime;
     uint256 public INTERVAL = 20 seconds;
     uint256 public intendedStartTime = block.timestamp + 30 seconds;
 
     function setUp() public {
+        (
+            ,
+            ,
+            ,
+            address link,
+            ,
+            ,
+            ,
+            ,
+            bytes32 keyHash
+        ) = helper.activeNetworkConfig();
+
+        vrfCoordinator = new MockVRFCoordinatorV2();
+        uint64 subscriptionId = vrfCoordinator.createSubscription();
+        uint96 FUND_AMOUNT = 1000 ether;
+        vrfCoordinator.fundSubscription(subscriptionId, FUND_AMOUNT);
+        loot = new Loot();
+
+        game = new DomStrategyGame(loot, address(vrfCoordinator), link, subscriptionId, keyHash);
+
         staticTime = block.timestamp;
-        gameKeeper = new GameKeeper(INTERVAL, intendedStartTime);
+        gameKeeper = new GameKeeper(INTERVAL, intendedStartTime, address(game));
         vm.warp(staticTime);
     }
 
@@ -34,7 +62,7 @@ contract GameKeeperTest is Test {
         // Expect to start at 31
         uint256 gameStartTime = gameKeeper.gameStartTimestamp();
         // 30 seconds till start
-        uint256 timeRemainingTillStart = gameKeeper.gameStartRemainingTime();
+        int256 timeRemainingTillStart = gameKeeper.gameStartRemainingTime();
 
         assertTrue(timeRemainingTillStart == 30 seconds);
 

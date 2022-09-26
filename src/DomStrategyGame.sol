@@ -63,6 +63,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     uint256 public winnerAllianceId;
     address public vrf_owner;
     address[] inmates;
+    address[] activePlayers;
     bytes32 immutable vrf_keyHash;
     uint16 immutable vrf_requestConfirmations = 3;
     uint32 immutable vrf_callbackGasLimit = 2_500_000;
@@ -74,7 +75,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     uint256 public currentTurn;
     uint256 public currentTurnStartTimestamp;
     uint256 public constant maxPlayers = 100;
-    uint256 public activePlayers;
+    uint256 public activePlayersCount;
     uint256 public activeAlliances;
     uint256 public winningTeamSpoils;
 
@@ -159,6 +160,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     function connect(uint256 tokenId, address byoNft) external payable {
         require(currentTurn == 0, "Already started");
         require(spoils[msg.sender] == 0, "Already joined");
+        require(players[msg.sender].addr == address(0), "Already joined");
         // Your share of the spoils if you win as part of an alliance are proportional to how much you paid to connect.
         require(msg.value > 0, "Send some eth");
 
@@ -186,9 +188,10 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         playingField[nextAvailableRow][nextAvailableCol] = msg.sender;
         spoils[msg.sender] = msg.value;
         players[msg.sender] = player;
+        activePlayers.push(msg.sender);
         // every independent player initially gets counted as an alliance, when they join or leave  or die, retally
         activeAlliances += 1;
-        activePlayers += 1;
+        activePlayersCount += 1;
         nextAvailableCol = (nextAvailableCol + 2) % fieldSize;
         nextAvailableRow = nextAvailableCol == 0 ? nextAvailableRow + 1 : nextAvailableRow;
 
@@ -197,7 +200,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     // TODO: Somebody needs to call this, maybe make this a Keeper managed Cron job?
     function start() external {
         require(currentTurn == 0, "Already started");
-        require(activePlayers > 1, "No players");
+        require(activePlayersCount > 1, "No players");
         require(randomness != 0, "Need randomness for jail cell");
 
         currentTurn = 1;
@@ -247,10 +250,9 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     // The turns are processed in random order. The contract offloads sorting the players
     // list off-chain to save gas
-    function resolve(uint256 turn, address[] calldata sortedAddrs) external {
+    function resolve(uint256 turn) external {
         require(turn == currentTurn, "Stale tx");
         require(randomness != 0, "Roll the die first");
-        require(sortedAddrs.length == activePlayers, "Not enough players");
         require(block.timestamp > currentTurnStartTimestamp + 18 hours);
 
         if (turn % 5 == 0) {
@@ -258,8 +260,9 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         }
 
         // TODO: this will exceed block gas limit eventually, need to split `resolve` in a way that it can be called incrementally
-        for (uint256 i = 0; i < sortedAddrs.length; i++) {
-            address addr = sortedAddrs[i];
+        for (uint256 i = 0; i < activePlayersCount; i++) {
+            address addr = activePlayers[i];
+
             Player storage player = players[addr];
 
             (bool success, bytes memory err) = address(this).call(player.pendingMove);
@@ -268,7 +271,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                 // Player submitted a bad move
                 if (int(player.balance - 0.05 ether) >= 0) {
                     player.balance -= 0.05 ether;
-                    emit BadMovePenalty(turn, addr, err);
+                    emit BadMovePenalty(turn, player.addr, err);
                 } else {
                     sendToJail(player);
                 }
@@ -541,7 +544,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                 if (defenderAlliance.membersCount == 1) {
                     // if you're down to one member, ain't no alliance left
                     activeAlliances -= 1;
-                    activePlayers -= 1;
+                    activePlayersCount -= 1;
                 }
 
                 console.log("Defender was in an alliance: ", activeAlliances);
@@ -552,12 +555,12 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                     emit WinnerAlliance(winnerAllianceId);
                 }
             } else {
-                activePlayers -= 1;
+                activePlayersCount -= 1;
                 activeAlliances -= 1;
 
                 Alliance storage attackerAlliance = alliances[attacker.allianceId];
                 console.log("Defender was NOT in an alliance: ", activeAlliances);
-                if (activePlayers == 1) {
+                if (activePlayersCount == 1) {
                     // win condition
                     winnerPlayer = attacker.addr;
                     emit WinnerPlayer(winnerPlayer);
@@ -591,7 +594,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                 if (attackerAlliance.membersCount == 1) {
                     // if you're down to one member, ain't no alliance left
                     activeAlliances -= 1;
-                    activePlayers -= 1;
+                    activePlayersCount -= 1;
                 }
 
                 if (activeAlliances == 1) {
@@ -600,9 +603,9 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                     emit WinnerAlliance(winnerAllianceId);
                 }
             } else {
-                activePlayers -= 1;
+                activePlayersCount -= 1;
 
-                if (activePlayers == 1) {
+                if (activePlayersCount == 1) {
                     // win condition
                     winnerPlayer = defender.addr;
                     emit WinnerPlayer(winnerPlayer);

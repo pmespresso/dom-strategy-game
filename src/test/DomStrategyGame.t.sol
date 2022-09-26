@@ -164,7 +164,7 @@ contract DomStrategyGameTest is Test {
             address(game)
         );
         
-        game.resolve(turn, sortedAddrs2P);
+        game.resolve(turn);
         vm.stopPrank();
     }
 
@@ -188,7 +188,7 @@ contract DomStrategyGameTest is Test {
             address(game)
         );
         
-        game.resolve(turn, sortedAddrs4P);
+        game.resolve(turn);
         vm.stopPrank();
     }
 
@@ -378,7 +378,7 @@ contract DomStrategyGameTest is Test {
         require(game.playingField(4, 5) == address(0), "piskomate's old position should be empty.");
         require(x_dhof_after == 4 && y_dhof_after == 4 && isDhofInJail == false, "dhof should be in piskomate's old position");
         // check player count reduced
-        require(game.activePlayers() == 1, "Active player count should be zero.");
+        require(game.activePlayersCount() == 1, "Active player count should be zero.");
 
         // Check that game ends when only 1 active player remaining, and withdraw becomes available.
         require(game.winnerPlayer() == dhof, "Dhof should be declared the winner");

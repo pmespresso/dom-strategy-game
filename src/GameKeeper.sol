@@ -4,11 +4,11 @@ pragma solidity ^0.8.0;
 import "chainlink/v0.8/interfaces/KeeperCompatibleInterface.sol";
 
 interface IDomStrategyGame {
-    function activePlayers() external returns (uint256);
+    function activePlayersCount() external returns (uint256);
     function maxPlayers() external returns (uint256);
     function currentTurn() external returns (uint256);
     function start() external;
-    function resolve(uint256 turn, address[] calldata sortedAddrs) external;
+    function resolve(uint256 turn) external;
 }
 
 contract GameKeeper is KeeperCompatibleInterface {
@@ -43,14 +43,15 @@ contract GameKeeper is KeeperCompatibleInterface {
         if (gameStarted) {
             uint256 turn = IDomStrategyGame(game).currentTurn() + 1;
             // TODO: figure out how to get sortedAddrs from an offchain source to here
-            IDomStrategyGame(game).resolve(turn, sortedAddrs);
+            // actually this doesn't necessarily need to be sorted, can be random order using VRf
+            IDomStrategyGame(game).resolve(turn);
         } else {
             uint256 maxPlayers = IDomStrategyGame(game).maxPlayers();
-            uint256 activePlayers = IDomStrategyGame(game).activePlayers();
+            uint256 activePlayersCount = IDomStrategyGame(game).activePlayersCount();
             gameStartRemainingTime = int(gameStartTimestamp - block.timestamp);
 
             // check if max players or game start time reached
-            if (activePlayers == maxPlayers || gameStartRemainingTime <= 0) {
+            if (activePlayersCount == maxPlayers || gameStartRemainingTime <= 0) {
                 IDomStrategyGame(game).start();
                 // now set interval to every 18 hours
                 interval = 18 hours;
