@@ -234,6 +234,12 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
 
+        console.log("=== commitment ===");
+        console.logBytes32(commitment);
+
+        console.log("=== proof ===");
+        console.logBytes32(proof);
+
         require(commitment == proof, "No cheating");
 
         players[msg.sender].pendingMove = data;

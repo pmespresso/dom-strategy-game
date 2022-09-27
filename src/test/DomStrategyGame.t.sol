@@ -134,7 +134,11 @@ contract DomStrategyGameTest is Test {
     }
 
     function revealAndResolve4P(uint256 turn, bytes32 nonce1,bytes32 nonce2,bytes32 nonce3,bytes32 nonce4, bytes memory call1, bytes memory call2, bytes memory call3, bytes memory call4) public {
-        revealAndResolve2P(turn, nonce1, nonce2, call1, call2);
+        vm.prank(piskomate);
+        game.reveal(turn, nonce1, call1);
+
+        vm.prank(dhof);
+        game.reveal(turn, nonce2, call2);
 
         vm.prank(arthur);
         game.reveal(turn, nonce3, call3);
