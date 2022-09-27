@@ -9,14 +9,12 @@ import "chainlink/v0.8/interfaces/LinkTokenInterface.sol";
 import "chainlink/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "chainlink/v0.8/VRFConsumerBaseV2.sol";
 
-import "./Loot.sol";
-
+// TODO: Pack this struct once we know all the fields
 struct Player {
-    // TODO: Pack this struct once we know all the fields
     address addr;
     address nftAddress;
-    uint256 balance;
     uint256 tokenId;
+    uint256 balance;
     uint256 lastMoveTimestamp;
     uint256 allianceId;
     uint256 hp;
@@ -42,7 +40,6 @@ struct JailCell {
 }
 
 contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
-    Loot public loot;
     JailCell public jailCell;
     mapping(address => Player) public players;
     mapping(uint256 => Alliance) public alliances;
@@ -133,13 +130,11 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     event Jail(address indexed who, uint256 indexed inmatesCount);
 
     constructor(
-        Loot _loot,
         address _vrfCoordinator,
         address _linkToken,
         uint64 _subscriptionId,
         bytes32 _keyHash) VRFConsumerBaseV2(_vrfCoordinator)
     payable {
-        loot = _loot;
         fieldSize = maxPlayers; // also the max players
 
         // VRF
@@ -175,7 +170,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         Player memory player = Player({
             addr: msg.sender,
-            nftAddress: byoNft == address(0) ? address(loot) : byoNft,
+            nftAddress: byoNft,
             balance: msg.value, // balance can be used to buy shit
             tokenId: tokenId,
             lastMoveTimestamp: block.timestamp,
@@ -266,6 +261,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         }
 
         // TODO: this will exceed block gas limit eventually, need to split `resolve` in a way that it can be called incrementally
+        // TODO: don't start at 0 every time, use vrf or some heuristic
         for (uint256 i = 0; i < activePlayersCount; i++) {
             address addr = activePlayers[i];
 
@@ -276,14 +272,18 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                 continue;
             }
             
-            // If player straight up didn't submit then confiscate their NFT
+            // If player straight up didn't submit then confiscate their NFT and send to jail
             if (player.pendingMoveCommitment == bytes32(0)) {
-                IERC721(player.nftAddress).safeTransferFrom(player.addr, address(this), player.tokenId, "");
+                IERC721(player.nftAddress).safeTransferFrom(player.addr, address(this), player.tokenId);
 
                 emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
+
+                sendToJail(player);
+                continue;
             } else if (player.pendingMoveCommitment != bytes32(0) && player.pendingMove.length == 0) { // If player submitted but forgot to reveal, move them to jail
                 sendToJail(player);
                 // if you are in jail but your alliance wins, you still get a cut of the spoils
+                continue;
             }
 
             (bool success, bytes memory err) = address(this).call(player.pendingMove);
@@ -731,12 +731,11 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     }
 
     function onERC721Received(
-        address,
-        address,
-        uint256,
+        address, 
+        address, 
+        uint256, 
         bytes calldata
-    ) external pure returns (bytes4) {
-        // require(msg.sender == address(loot) || msg.sender == address(bayc));
-        return IERC721Receiver.onERC721Received.selector;
+    ) external pure returns(bytes4) {
+        return bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"));
     }
 }

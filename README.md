@@ -27,7 +27,7 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
   - [x] Submit stage (18 hours): Make your move and submit a hash of it to initiall hide from other players
   - [x] Reveal stage (18 hours); Submit plaintext version of your move and its password to reveal it
     - [x] If you submit and forget to reveal your move you are penalized by getting sent to jail
-    - [x] If you don't submit nor reveal your move you are penalized by us confiscating your NFT
+    - [x] If you don't submit nor reveal your move you are penalized by us confiscating your NFT and also jail
   - [x] Resolution (instant-ish): All moves are process, and next submit stage begins (Chainlink Keeper calls `rollDice()` then `resolve()` every 18 hours)
 
 #### Moving

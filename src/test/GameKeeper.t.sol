@@ -4,7 +4,6 @@ pragma solidity ^0.8.0;
 
 import "../../script/HelperConfig.sol";
 import "./mocks/MockVRFCoordinatorV2.sol";
-import "../Loot.sol";
 import "../DomStrategyGame.sol";
 import "../GameKeeper.sol";
 import "forge-std/console.sol";
@@ -16,7 +15,6 @@ contract GameKeeperTest is Test {
     GameKeeper public gameKeeper;
     MockVRFCoordinatorV2 vrfCoordinator;
     HelperConfig helper = new HelperConfig();
-    Loot public loot;
     uint256 public staticTime;
     uint256 public INTERVAL = 20 seconds;
     uint256 public intendedStartTime = block.timestamp + 30 seconds;
@@ -38,9 +36,8 @@ contract GameKeeperTest is Test {
         uint64 subscriptionId = vrfCoordinator.createSubscription();
         uint96 FUND_AMOUNT = 1000 ether;
         vrfCoordinator.fundSubscription(subscriptionId, FUND_AMOUNT);
-        loot = new Loot();
 
-        game = new DomStrategyGame(loot, address(vrfCoordinator), link, subscriptionId, keyHash);
+        game = new DomStrategyGame(address(vrfCoordinator), link, subscriptionId, keyHash);
 
         staticTime = block.timestamp;
         gameKeeper = new GameKeeper(INTERVAL, intendedStartTime, address(game));
