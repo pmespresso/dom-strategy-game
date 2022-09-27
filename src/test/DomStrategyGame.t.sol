@@ -474,7 +474,7 @@ contract DomStrategyGameTest is Test {
         bytes32 nonce7 = hex"07";
         bytes32 nonce8 = hex"08";
 
-        (address admin,,,,) = game.alliances(allianceId);
+        (address admin,,,,,) = game.alliances(allianceId);
         console.log("Alliance Admin: ", admin);
 
         // Piskomate, Dhof join the alliance
@@ -509,7 +509,7 @@ contract DomStrategyGameTest is Test {
 
         revealAndResolve4P(turn, nonce5, nonce6, nonce7, nonce8, piskomateJoin, dhofJoin, arthurRest, w1nt3rMove);
 
-        (address allianceAdmin, uint256 arthurAllianceId, uint256 membersCount, uint256 maxMembersCount,) = game.alliances(1);
+        (address allianceAdmin, uint256 arthurAllianceId, uint256 membersCount, uint256 maxMembersCount,,) = game.alliances(1);
 
         require(game.allianceAdmins(allianceId) == arthur && allianceAdmin == arthur, "Arthur should be the alliance admin.");
         require(membersCount == 3, "There should be 3 members after Pisko, Dhof join Arthur's Alliance.");
@@ -574,29 +574,30 @@ contract DomStrategyGameTest is Test {
         vm.warp(block.timestamp + 19 hours);
         revealAndResolve4P(turn, nonce9, nonce10, nonce11, nonce12, piskomateRestAgain, dhofRestAgain, arthurMoveAgain, w1nt3rRestAgain);
 
-        // make sure alliance splits the spoils evenly.
-        // TODO: maybe the incentive to put more at stake is that if you win in an alliance you get proportionately more of the total spoils.
+        // make sure alliance splits the spoils proportionately to their staked balance
         require(game.winningTeamSpoils() == 9.9 ether, "The total spoils to share should be the sum of all Ether the players put up at stake to connect.");
 
+        // let each member withdraw their share
         vm.startPrank(arthur);
-        game.withdrawWinnerAlliance();
+        game.withdrawWinnerAlliance(); // 1 / 8.9 * 9.9
         vm.stopPrank();
 
         vm.startPrank(piskomate);
-        game.withdrawWinnerAlliance();
+        game.withdrawWinnerAlliance(); // 1 / 8.9 * 9.9
         vm.stopPrank();
 
         vm.startPrank(dhof);
-        game.withdrawWinnerAlliance();
+        game.withdrawWinnerAlliance(); // 6.9 / 8.9 * 9.9
         vm.stopPrank();
 
-        // each should get 3.3 ether at the end
-        // FIXME: dhof fucking loses ether even though he won. therefore, should make rewards proportional
-        require(arthur.balance == 3.3 ether);
-        require(piskomate.balance == 3.3 ether);
-        require(dhof.balance == 3.3 ether);
+        console.log("arthur.balance ", arthur.balance);
+        console.log("piskomate.balance ", piskomate.balance);
+        console.log("dhof.balance ", dhof.balance);
 
-        // let each member withdraw their share
+        require(arthur.balance >= 1.11 ether);
+        require(piskomate.balance >= 1.11 ether);
+        require(dhof.balance >= 7.67 ether);
+
         vm.startPrank(w1nt3r);
         vm.expectRevert(abi.encodeWithSelector(
                 DomStrategyGame.OnlyWinningAllianceMember.selector

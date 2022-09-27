@@ -31,6 +31,7 @@ struct Alliance {
     uint256 id;
     uint256 membersCount;
     uint256 maxMembers;
+    uint256 totalBalance; // used for calc cut of spoils in win condition
     string name;
 }
 
@@ -234,11 +235,11 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
 
-        console.log("=== commitment ===");
-        console.logBytes32(commitment);
+        // console.log("=== commitment ===");
+        // console.logBytes32(commitment);
 
-        console.log("=== proof ===");
-        console.logBytes32(proof);
+        // console.log("=== proof ===");
+        // console.logBytes32(proof);
 
         require(commitment == proof, "No cheating");
 
@@ -402,6 +403,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             id: nextAvailableAllianceId,
             membersCount: 1,
             maxMembers: maxMembers,
+            totalBalance: players[player].balance,
             name: name
         });
         if (allianceMembers[nextAvailableAllianceId].length > 0) {
@@ -440,6 +442,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         require(alliance.membersCount < alliance.maxMembers - 1, "Cannot exceed max members count.");
 
         alliances[allianceId].membersCount += 1;
+        alliances[allianceId].totalBalance += players[player].balance;
         if (allianceMembers[allianceId].length > 0) {
             allianceMembers[allianceId].push(player);
         } else {
@@ -468,15 +471,28 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         }
 
         alliances[allianceId].membersCount -= 1;
+        alliances[allianceId].totalBalance -= players[player].balance;
         activeAlliances += 1;
 
         emit AllianceMemberLeft(allianceId, player);
     }
     
     function withdrawWinnerAlliance() onlyWinningAllianceMember public {
-        Alliance memory winningAlliance = alliances[winnerAllianceId];
+        uint256 winningAllianceTotalBalance = alliances[winnerAllianceId].totalBalance;
+        uint256 withdrawerBalance = players[msg.sender].balance;
 
-        uint256 myCut = winningTeamSpoils / winningAlliance.membersCount;
+        console.log("withdrawer bal", withdrawerBalance);
+        console.log("winningAlliance total", winningAllianceTotalBalance);
+        console.log("Winning team spoils: ", winningTeamSpoils);
+
+        // withdrawerBalance: how much withdrawer staked to join
+        // winningTeamSpoils: all the spoils gained after looting other players
+        // winningAllianceTotalBalance: sum total that the allies staked to join
+
+        // eg. dhofBal 1 ether / winningAllianceTotalBalance 8.9 ether * winningTeamSpoils 9.9 ether
+        uint256 myCut = (withdrawerBalance * winningTeamSpoils) / winningAllianceTotalBalance;
+
+        console.log("myCut: ", myCut);
 
         (bool sent, ) = msg.sender.call{ value: myCut }("");
 
@@ -497,13 +513,13 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         
         address[] memory winners = allianceMembers[winnerAllianceId];
 
-        console.log("calcWinningAllianceSpoils(): ");
-
         uint256 totalSpoils = 0;
 
         for (uint256 i = 0; i < winners.length; i++) {
             totalSpoils += spoils[winners[i]];
         }
+
+        console.log("calcWinningAllianceSpoils(): ", totalSpoils);
 
         winningTeamSpoils = totalSpoils;
     }
@@ -558,14 +574,21 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             // And then moves to jail
             sendToJail(defender);
 
-            // Player 1 takes defender's spoils
+            // attacker takes defender's spoils
             spoils[attacker.addr] += spoils[defender.addr];
             spoils[defender.addr] = 0;
             
+            // If Winner was in an Alliance
+            if (attacker.allianceId != 0) {
+                Alliance storage attackerAlliance = alliances[attacker.allianceId];
+                attackerAlliance.totalBalance += spoils[defender.addr];
+            }
+                
             // If Loser was in an Alliance
             if (defender.allianceId != 0) {
                 // Also will need to leave the alliance cuz ded
                 Alliance storage defenderAlliance = alliances[defender.allianceId];
+                defenderAlliance.totalBalance -= spoils[defender.addr];
                 defenderAlliance.membersCount -= 1;
                 defender.allianceId = 0;
 
@@ -613,9 +636,18 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             spoils[defender.addr] += spoils[attacker.addr];
             spoils[attacker.addr] = 0;
 
+            // If Defender was in an Alliance
+            if (defender.allianceId != 0) {
+                Alliance storage defenderAlliance = alliances[defender.allianceId];
+                defenderAlliance.totalBalance += spoils[attacker.addr];
+            }
+
+            // if Attacker was in an alliance
             if (attacker.allianceId != 0) {
                 // Also will need to leave the alliance cuz ded
                 Alliance storage attackerAlliance = alliances[attacker.allianceId];
+
+                attackerAlliance.totalBalance -= spoils[attacker.addr];
                 attackerAlliance.membersCount -= 1;
                 attacker.allianceId = 0;
 
