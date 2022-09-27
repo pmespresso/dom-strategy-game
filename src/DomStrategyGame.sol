@@ -9,14 +9,12 @@ import "chainlink/v0.8/interfaces/LinkTokenInterface.sol";
 import "chainlink/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "chainlink/v0.8/VRFConsumerBaseV2.sol";
 
-import "./Loot.sol";
-
+// TODO: Pack this struct once we know all the fields
 struct Player {
-    // TODO: Pack this struct once we know all the fields
     address addr;
     address nftAddress;
-    uint256 balance;
     uint256 tokenId;
+    uint256 balance;
     uint256 lastMoveTimestamp;
     uint256 allianceId;
     uint256 hp;
@@ -42,7 +40,6 @@ struct JailCell {
 }
 
 contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
-    Loot public loot;
     JailCell public jailCell;
     mapping(address => Player) public players;
     mapping(uint256 => Alliance) public alliances;
@@ -62,7 +59,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     address public winnerPlayer;
     uint256 public winnerAllianceId;
     address public vrf_owner;
-    address[] inmates;
+    address[] public inmates;
+    address[] activePlayers;
     bytes32 immutable vrf_keyHash;
     uint16 immutable vrf_requestConfirmations = 3;
     uint32 immutable vrf_callbackGasLimit = 2_500_000;
@@ -73,8 +71,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     uint256 nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
     uint256 public currentTurn;
     uint256 public currentTurnStartTimestamp;
-    
-    uint256 public activePlayers;
+    uint256 public constant maxPlayers = 100;
+    uint256 public activePlayersCount;
     uint256 public activeAlliances;
     uint256 public winningTeamSpoils;
 
@@ -120,22 +118,24 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         uint256 indexed allianceId,
         address indexed player
     );
-    event Move(address indexed who, uint newX, uint newY);
-    event DamageDealt(address indexed by, address indexed to, uint256 indexed amount);
+    
     event BattleCommenced(address indexed player1, address indexed defender);
     event BattleFinished(address indexed winner, uint256 indexed spoils);
+    event DamageDealt(address indexed by, address indexed to, uint256 indexed amount);
+    event Move(address indexed who, uint newX, uint newY);
+    event NftConfiscated(address indexed who, address indexed nftAddress, uint256 indexed tokenId);
     event WinnerPlayer(address indexed winner);
     event WinnerAlliance(uint indexed allianceId);
     event WinnerWithdrawSpoils(address indexed winner, uint256 indexed spoils);
+    event Jail(address indexed who, uint256 indexed inmatesCount);
+
     constructor(
-        Loot _loot,
         address _vrfCoordinator,
         address _linkToken,
         uint64 _subscriptionId,
         bytes32 _keyHash) VRFConsumerBaseV2(_vrfCoordinator)
     payable {
-        loot = _loot;
-        fieldSize = 100;
+        fieldSize = maxPlayers; // also the max players
 
         // VRF
         COORDINATOR = VRFCoordinatorV2Interface(_vrfCoordinator);
@@ -159,6 +159,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     function connect(uint256 tokenId, address byoNft) external payable {
         require(currentTurn == 0, "Already started");
         require(spoils[msg.sender] == 0, "Already joined");
+        require(players[msg.sender].addr == address(0), "Already joined");
         // Your share of the spoils if you win as part of an alliance are proportional to how much you paid to connect.
         require(msg.value > 0, "Send some eth");
 
@@ -169,7 +170,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         Player memory player = Player({
             addr: msg.sender,
-            nftAddress: byoNft == address(0) ? address(loot) : byoNft,
+            nftAddress: byoNft,
             balance: msg.value, // balance can be used to buy shit
             tokenId: tokenId,
             lastMoveTimestamp: block.timestamp,
@@ -186,9 +187,10 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         playingField[nextAvailableRow][nextAvailableCol] = msg.sender;
         spoils[msg.sender] = msg.value;
         players[msg.sender] = player;
+        activePlayers.push(msg.sender);
         // every independent player initially gets counted as an alliance, when they join or leave  or die, retally
         activeAlliances += 1;
-        activePlayers += 1;
+        activePlayersCount += 1;
         nextAvailableCol = (nextAvailableCol + 2) % fieldSize;
         nextAvailableRow = nextAvailableCol == 0 ? nextAvailableRow + 1 : nextAvailableRow;
 
@@ -197,7 +199,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     // TODO: Somebody needs to call this, maybe make this a Keeper managed Cron job?
     function start() external {
         require(currentTurn == 0, "Already started");
-        require(activePlayers > 1, "No players");
+        require(activePlayersCount > 1, "No players");
         require(randomness != 0, "Need randomness for jail cell");
 
         currentTurn = 1;
@@ -211,6 +213,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     function submit(uint256 turn, bytes32 commitment) external {
         require(currentTurn > 0, "Not started");
         require(turn == currentTurn, "Stale tx");
+        // submit stage is 18 hours
         require(block.timestamp <= currentTurnStartTimestamp + 18 hours);
 
         players[msg.sender].pendingMoveCommitment = commitment;
@@ -224,11 +227,18 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         bytes calldata data
     ) external {
         require(turn == currentTurn, "Stale tx");
+        // then another 18 hours for the reveal stage
         require(block.timestamp > currentTurnStartTimestamp + 18 hours);
         require(block.timestamp < currentTurnStartTimestamp + 36 hours);
 
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
+
+        console.log("=== commitment ===");
+        console.logBytes32(commitment);
+
+        console.log("=== proof ===");
+        console.logBytes32(proof);
 
         require(commitment == proof, "No cheating");
 
@@ -247,10 +257,9 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     // The turns are processed in random order. The contract offloads sorting the players
     // list off-chain to save gas
-    function resolve(uint256 turn, address[] calldata sortedAddrs) external {
+    function resolve(uint256 turn) external {
         require(turn == currentTurn, "Stale tx");
         require(randomness != 0, "Roll the die first");
-        require(sortedAddrs.length == activePlayers, "Not enough players");
         require(block.timestamp > currentTurnStartTimestamp + 18 hours);
 
         if (turn % 5 == 0) {
@@ -258,9 +267,30 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         }
 
         // TODO: this will exceed block gas limit eventually, need to split `resolve` in a way that it can be called incrementally
-        for (uint256 i = 0; i < sortedAddrs.length; i++) {
-            address addr = sortedAddrs[i];
+        // TODO: don't start at 0 every time, use vrf or some heuristic
+        for (uint256 i = 0; i < activePlayersCount; i++) {
+            address addr = activePlayers[i];
+
             Player storage player = players[addr];
+
+            // If you're in jail you no longer get to do shit. Just hope somebody breaks you out.
+            if (player.inJail) {
+                continue;
+            }
+            
+            // If player straight up didn't submit then confiscate their NFT and send to jail
+            if (player.pendingMoveCommitment == bytes32(0)) {
+                IERC721(player.nftAddress).safeTransferFrom(player.addr, address(this), player.tokenId);
+
+                emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
+
+                sendToJail(player);
+                continue;
+            } else if (player.pendingMoveCommitment != bytes32(0) && player.pendingMove.length == 0) { // If player submitted but forgot to reveal, move them to jail
+                sendToJail(player);
+                // if you are in jail but your alliance wins, you still get a cut of the spoils
+                continue;
+            }
 
             (bool success, bytes memory err) = address(this).call(player.pendingMove);
 
@@ -268,7 +298,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                 // Player submitted a bad move
                 if (int(player.balance - 0.05 ether) >= 0) {
                     player.balance -= 0.05 ether;
-                    emit BadMovePenalty(turn, addr, err);
+                    spoils[player.addr] == player.balance;
+                    emit BadMovePenalty(turn, player.addr, err);
                 } else {
                     sendToJail(player);
                 }
@@ -302,7 +333,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         If you try to move into an occupied cell, you need to battle. 
         If you do enough damage you take their spoils and move into their cell. If you only do some damage but they have hp remaining, you don't move.
      */
-     // TODO: surely I can clean this up
+     // TODO: surely this can be cleaner
     function move(address player, int8 direction) public {
         require(msg.sender == address(this), "Only via submit/reveal");
         Player storage invader = players[player];
@@ -541,7 +572,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                 if (defenderAlliance.membersCount == 1) {
                     // if you're down to one member, ain't no alliance left
                     activeAlliances -= 1;
-                    activePlayers -= 1;
+                    activePlayersCount -= 1;
                 }
 
                 console.log("Defender was in an alliance: ", activeAlliances);
@@ -552,12 +583,12 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                     emit WinnerAlliance(winnerAllianceId);
                 }
             } else {
-                activePlayers -= 1;
+                activePlayersCount -= 1;
                 activeAlliances -= 1;
 
                 Alliance storage attackerAlliance = alliances[attacker.allianceId];
                 console.log("Defender was NOT in an alliance: ", activeAlliances);
-                if (activePlayers == 1) {
+                if (activePlayersCount == 1) {
                     // win condition
                     winnerPlayer = attacker.addr;
                     emit WinnerPlayer(winnerPlayer);
@@ -591,7 +622,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                 if (attackerAlliance.membersCount == 1) {
                     // if you're down to one member, ain't no alliance left
                     activeAlliances -= 1;
-                    activePlayers -= 1;
+                    activePlayersCount -= 1;
                 }
 
                 if (activeAlliances == 1) {
@@ -600,9 +631,9 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                     emit WinnerAlliance(winnerAllianceId);
                 }
             } else {
-                activePlayers -= 1;
+                activePlayersCount -= 1;
 
-                if (activePlayers == 1) {
+                if (activePlayersCount == 1) {
                     // win condition
                     winnerPlayer = defender.addr;
                     emit WinnerPlayer(winnerPlayer);
@@ -631,6 +662,9 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         player.x = jailCell.x;
         player.y = jailCell.y;
         player.inJail = true;
+        inmates.push(player.addr);
+
+        emit Jail(player.addr, inmates.length);
     }
 
     // Callbacks
@@ -703,12 +737,11 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     }
 
     function onERC721Received(
-        address,
-        address,
-        uint256,
+        address, 
+        address, 
+        uint256, 
         bytes calldata
-    ) external pure returns (bytes4) {
-        // require(msg.sender == address(loot) || msg.sender == address(bayc));
-        return IERC721Receiver.onERC721Received.selector;
+    ) external pure returns(bytes4) {
+        return bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"));
     }
 }

@@ -18,16 +18,17 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 - [x] Pay entry free to create player. Entry fee goes to the player's "spoils," and ETH Balance attached to your player. Game takes nothing.
 - [x] If you defeat a player, you win all their accumulated spoils. If you are defeated, you lose all your spoils.
 - [x] Spoils cannot be withdrawn till end of game
-- [ ] Either the max player limit is reached and `start()` is called automatically, or the `startCountdown` reaches 0 and `start()` is called by the Chainlink Keeper.
+- [x] Either the max player limit is reached and `start()` is called automatically, or the `startCountdown` reaches 0 and `start()` is called by the Chainlink Keeper.
 
 #### Turns
 
 - [ ] Turn based, 1 turn every 36 hours
   - [ ] (**editor's commment**: 36 hours eh? seems not very engaging...also a game gonna take fucking forever...also will need notifications so 90% of players don't just disappear after a couple moves)
-  - [ ] Submit stage (18 hours): Make your move and submit a hash of it to initiall hide from other players
-  - [ ] Reveal stage (18 hours); Submit plaintext version of your move and its password to reveal it
-    - [ ] If you don't rewveal your move you are penalized heavily (TBD what is the penalty, needs to outweigh not revealing move)
-  - [ ] Resolution (instant-ish): All moves are process, and next submit stage begins (Chainlink Keeper calls `rollDice()` then `resolve()` every 18 hours)
+  - [x] Submit stage (18 hours): Make your move and submit a hash of it to initiall hide from other players
+  - [x] Reveal stage (18 hours); Submit plaintext version of your move and its password to reveal it
+    - [x] If you submit and forget to reveal your move you are penalized by getting sent to jail
+    - [x] If you don't submit nor reveal your move you are penalized by us confiscating your NFT and also jail
+  - [x] Resolution (instant-ish): All moves are process, and next submit stage begins (Chainlink Keeper calls `rollDice()` then `resolve()` every 18 hours)
 
 #### Moving
 
@@ -71,5 +72,5 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 
 - [x] Every 5 turns (a little over a week), the play field is reduced in size (Battle Royale/Fortnite,Warzone, etc.) to force more battles over time and push towards a win.
 - [x] Every time a player submits a bad move, they are penalized byy 0.05 ether until they cannot pay anymore at which point they are sent to jail.
-- [ ]
+- [ ] At then end of the game we need to do something with the confiscated NFTs, maybe put it up for auction lol
 - [ ] Items places randomly along the grid could power up attributes like hp or attack and even allow teleport
