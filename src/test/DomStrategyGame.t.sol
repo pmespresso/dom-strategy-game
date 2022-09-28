@@ -183,10 +183,8 @@ contract DomStrategyGameTest is Test {
 
         // To make a move, you submit a hash of the intended move with the current turn, a nonce, and a call to either move or rest. Everyone's move is collected and then revealed at once after 18 hours
         vm.prank(piskomate);
-        bytes memory call1 = abi.encodeWithSelector(
-            DomStrategyGame.rest.selector,
-            piskomate
-        );
+        bytes memory call1 = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
+
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, call1)));
         
         vm.prank(dhof);
@@ -195,6 +193,7 @@ contract DomStrategyGameTest is Test {
             dhof,
             int8(2)
         );
+
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, call2)));
 
         // every 18 hours all players need to reveal their respective move for that turn.
@@ -206,7 +205,7 @@ contract DomStrategyGameTest is Test {
         (,,,,,,uint256 hp_dhof,,uint256 x_dhof,uint256 y_dhof,bytes32 pendingMoveCommitment_dhof,,) = game.players(dhof);
 
         require(x_piskomate == 0 && y_piskomate == 0, "piskomate should have remained in place from rest()");
-        require(x_dhof == 3 && y_dhof == 0, "Dhof should have moved right one square from move(4)");
+        require(x_dhof == 3 && y_dhof == 0, "Dhof should have moved right one square from move(dhof, 2)");
         require(game.playingField(3, 0) == dhof, "Playing field should record dhof new position");
         require(game.playingField(0, 0) == piskomate, "Playing field should record piskomate new position");
         require(hp_dhof == 1000, "piskomate should have recovered 2 hp from rest()");

@@ -129,6 +129,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     event WinnerAlliance(uint indexed allianceId);
     event WinnerWithdrawSpoils(address indexed winner, uint256 indexed spoils);
     event Jail(address indexed who, uint256 indexed inmatesCount);
+    event AttemptJailBreak(address indexed who, uint256 x, uint256 y);
+    event JailBreak(address indexed who);
 
     constructor(
         address _vrfCoordinator,
@@ -197,7 +199,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
         emit Joined(msg.sender);
     }
-    // TODO: Somebody needs to call this, maybe make this a Keeper managed Cron job?
+
+    // N.B. called by GameKeeper.sol
     function start() external {
         require(currentTurn == 0, "Already started");
         require(activePlayersCount > 1, "No players");
@@ -249,7 +252,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     }
 
     // N.B. roll dice should be done by Chainlink Keeprs
-    function rollDice(uint256 turn) external {
+    function rollDice(uint256 turn) public {
         require(turn == currentTurn, "Stale tx");
         require(block.timestamp > currentTurnStartTimestamp + 18 hours);
 
@@ -293,6 +296,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                 continue;
             }
 
+            // FIXME; Would be nice for contract size to make move,rest,etc. internal but this fails for some reason if it's internal
             (bool success, bytes memory err) = address(this).call(player.pendingMove);
 
             if (!success) {
@@ -331,8 +335,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     // (-1, 1) = (up, down)
     // (-2, 2) = (left, right)
-    function move(address player, int8 direction) external {
-        require(msg.sender == address(this), "Only via submit/reveal");
+    function move(address player, int8 direction) external onlyViaSubmitReveal {
         Player storage invader = players[player];
         uint256 newX = invader.x;
         uint256 newY = invader.y;
@@ -362,6 +365,11 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         }
 
         address currentOccupant = playingField[newX][newY];
+        if (newX == jailCell.x && newY == jailCell.y) {
+            emit AttemptJailBreak(msg.sender, jailCell.x, jailCell.y);
+            _jailbreak(msg.sender);
+        }
+
         if (checkIfCanAttack(invader.addr, currentOccupant)) {
             _battle(player, currentOccupant);
         } else {
@@ -373,13 +381,11 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         emit Move(invader.addr, invader.x, invader.y);
     }
 
-    function rest(address player) public {
-        require(msg.sender == address(this), "Only via submit/reveal");
+    function rest(address player) external onlyViaSubmitReveal {
         players[player].hp += 2;
     }
 
-    function createAlliance(address player, uint256 maxMembers, string calldata name) public {
-        require(msg.sender == address(this), "Only via submit/reveal");
+    function createAlliance(address player, uint256 maxMembers, string calldata name) external onlyViaSubmitReveal {
         require(players[player].allianceId == 0, "Already in alliance");
 
         players[player].allianceId = nextAvailableAllianceId;
@@ -410,8 +416,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         uint8 v,
         bytes32 r,
         bytes32 s
-    ) public {
-        require(msg.sender == address(this), "Only via submit/reveal");
+    ) external onlyViaSubmitReveal {
 
         // Admin must sign the application off-chain. Applications are per-move based, so the player
         // can't reuse the application from the previous move
@@ -443,8 +448,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         emit AllianceMemberJoined(players[player].allianceId, player);
     }
 
-    function leaveAlliance(address player) public {
-        require(msg.sender == address(this), "Only via submit/reveal");
+    function leaveAlliance(address player) external onlyViaSubmitReveal {
         uint256 allianceId = players[player].allianceId;
         require(allianceId != 0, "Not in alliance");
         require(player != allianceAdmins[players[player].allianceId], "Admin canot leave alliance");
@@ -464,7 +468,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         emit AllianceMemberLeft(allianceId, player);
     }
     
-    function withdrawWinnerAlliance() onlyWinningAllianceMember public {
+    function withdrawWinnerAlliance() onlyWinningAllianceMember external {
         uint256 winningAllianceTotalBalance = alliances[winnerAllianceId].totalBalance;
         uint256 withdrawerBalance = players[msg.sender].balance;
         uint256 myCut = (withdrawerBalance * winningTeamSpoils) / winningAllianceTotalBalance;
@@ -474,7 +478,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         require(sent, "Failed to withdraw spoils");
     }
 
-    function withdrawWinnerPlayer() onlyWinner public {
+    function withdrawWinnerPlayer() onlyWinner external {
         (bool sent, ) = winnerPlayer.call{ value: spoils[winnerPlayer] }("");
         require(sent, "Failed to withdraw winnings");
         spoils[winnerPlayer] = 0;
@@ -662,6 +666,34 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         emit DamageDealt(defender.addr, attacker.addr, effectiveDamage2);
     }
 
+    function _jailbreak(address breakerOuter) internal {
+        // if it's greater than threshold everybody get out, including non alliance members
+        if (randomness % 99 > 50) {
+            for (uint256 i = 0; i < inmates.length; i++) {
+                address inmate = inmates[i];
+                if (inmate != address(0)) {
+                    freeFromJail(players[inmate], i);
+                }
+            }
+            inmates = new address[](fieldSize); // every one broke free so just reset
+        } else {
+            // if lower then roller gets jailed as well lol
+            sendToJail(players[breakerOuter]);
+        }
+    }
+
+    // N.b right now the scope is to just free if somebody lands on the cell and rolls a good number.
+    // could be fun to make an option for a player to bribe (pay some amount to free just alliance members)
+    function freeFromJail(Player storage player, uint256 inmateIndex) internal {
+        player.hp = 50;
+        player.x = jailCell.x;
+        player.y = jailCell.y;
+        player.inJail = false;
+        delete inmates[inmateIndex];
+
+        emit JailBreak(player.addr);
+    }
+
     function sendToJail(Player storage player) internal {
         player.hp = 0;
         player.x = jailCell.x;
@@ -728,6 +760,11 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         if(msg.sender != winnerPlayer) {
             revert LoserTriedWithdraw();
         }
+        _;
+    }
+
+    modifier onlyViaSubmitReveal() {
+        require(msg.sender == address(this), "Only via submit/reveal");
         _;
     }
 
