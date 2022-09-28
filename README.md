@@ -22,7 +22,7 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 
 #### Turns
 
-- [ ] Turn based, 1 turn every 36 hours
+- [ ] Turn based, 1 turn every 36 hours (must deploy to impl)
   - [ ] (**editor's commment**: 36 hours eh? seems not very engaging...also a game gonna take fucking forever...also will need notifications so 90% of players don't just disappear after a couple moves)
   - [x] Submit stage (18 hours): Make your move and submit a hash of it to initiall hide from other players
   - [x] Reveal stage (18 hours); Submit plaintext version of your move and its password to reveal it
@@ -34,7 +34,7 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 
 - [x] Players are initially spawned on 2D grid map in random starting spots. All starting spots are equidistant from one another.
 - [x] You can [MOVE] to one adjacent grid spot per turn. You can also [REST] in the grid spot you currently occupy.
-- [ ] Grid spots can reveal two things the firs time they are encountered:
+- [ ] Grid spots can reveal two things the first time they are encountered:
   - **Resources** which are picked up immediately and can be used to level up and train the character
   - **Effects** which are either continuous (Passive AOE), or triggered (provies additional [ABILITY] that can be used during a turn).
   - **Enemies** some other player who is already occupying the square (in which case you gotta battle it out)
@@ -55,7 +55,7 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 - [x] Players can choose to form alliances or apply to alliances.
 - [x] The player who forms the alliances is the **leader** and has sole rights over accepting or ignoring applications. (**editor's comment**: might be an interesting place to attach a mini-dao like structure to vote in / kick members)
 - [x] Players in an alliance will not attack each other then occupying the same slot.
-- [ ] If an alliance wins, all of the spoils between the players in the alliance are split proportionately to what they put up at stake.
+- [x] If an alliance wins, all of the spoils between the players in the alliance are split proportionately to what they put up at stake.
 - [ ] (**editors'comment**: are battles fought with a representative of the alliance or the cumulative stats of the alliance?)
 - [x] Players can only be in 1 alliance
 - [x] Alliances have a max membership count (TBD, based on intended total number of players)

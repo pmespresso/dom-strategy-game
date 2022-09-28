@@ -329,58 +329,45 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         emit TurnStarted(currentTurn, currentTurnStartTimestamp);
     }
 
-    /**
-        @param direction: 1=up, 2=down, 3=left, 4=right
-        If you try to move into an occupied cell, you need to battle. 
-        If you do enough damage you take their spoils and move into their cell. If you only do some damage but they have hp remaining, you don't move.
-     */
-     // TODO: surely this can be cleaner
-    function move(address player, int8 direction) public {
+    // (-1, 1) = (up, down)
+    // (-2, 2) = (left, right)
+    function move(address player, int8 direction) external {
         require(msg.sender == address(this), "Only via submit/reveal");
         Player storage invader = players[player];
+        uint256 newX = invader.x;
+        uint256 newY = invader.y;
 
-        // Change x & y depending on direction
-        if (direction == 1) { // up
-            require(int(invader.y - 1) >= 0, "Cannot move up past the edge.");
-            address currentOccupant = playingField[invader.x][invader.y - 1];
-
-        if (checkIfCanAttack(invader.addr, currentOccupant)) {            
-            // moving logic based on battle result handled in here
-                _battle(player, currentOccupant);
-            } else {
-                playingField[invader.x][invader.y] = address(0);
-                invader.y = invader.y -  1;
+        for (int8 i = -2; i <= 2; i++) {
+            if (i == 0) { continue; }
+            if (direction == i) {
+                if (direction > 0) { // down, right
+                    newX = direction == 2 ? uint(int(invader.x) + direction - 1) : invader.x;
+                    newY = direction == 1 ? uint(int(invader.y) + direction) : invader.y;
+                    require(
+                        direction == 2
+                            ? newX <= fieldSize
+                            : newY <= fieldSize
+                        );
+                } else { // up, left
+                    newX = direction == -2 ? uint(int(invader.x) + direction + 1) : invader.x;
+                    newY = direction == -1 ? uint(int(invader.y) + direction) : invader.y;
+                    require( 
+                        direction == 1
+                            ? newX >= 0
+                            : newY >= 0
+                    );
+                }
+                break;
             }
-        } else if (direction == 2) { // down
-            require(invader.y + 1 < fieldSize, "Cannot move down past the edge.");
-            address currentOccupant = playingField[invader.x][invader.y + 1];
+        }
 
-            if (checkIfCanAttack(invader.addr, currentOccupant)) {
-                _battle(player, currentOccupant);
-            } else {
-                playingField[invader.x][invader.y] = address(0);
-                invader.y = invader.y + 1;
-            }
-        } else if (direction == 3) { // left
-            require(int(invader.x - 1) >= 0, "Cannot move left past the edge.");
-            address currentOccupant = playingField[invader.x - 1][invader.y];
-
-            if (checkIfCanAttack(invader.addr, currentOccupant)) {
-                _battle(player, currentOccupant);
-            } else {
-                playingField[invader.x][invader.y] = address(0);
-                invader.x = invader.x - 1;
-            }
-        } else if (direction == 4) { // right
-            require(invader.x + 1 < fieldSize, "Cannot move right past the edge.");
-            address currentOccupant = playingField[invader.x + 1][invader.y];
-
-            if (checkIfCanAttack(invader.addr, currentOccupant)) {
-                _battle(player, currentOccupant);
-            } else {
-                playingField[invader.x][invader.y] = address(0);
-                invader.x = invader.x + 1;
-            }
+        address currentOccupant = playingField[newX][newY];
+        if (checkIfCanAttack(invader.addr, currentOccupant)) {
+            _battle(player, currentOccupant);
+        } else {
+            playingField[invader.x][invader.y] = address(0);
+            invader.x = newX;
+            invader.y = newY;
         }
         playingField[invader.x][invader.y] = player;
         emit Move(invader.addr, invader.x, invader.y);
@@ -480,19 +467,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     function withdrawWinnerAlliance() onlyWinningAllianceMember public {
         uint256 winningAllianceTotalBalance = alliances[winnerAllianceId].totalBalance;
         uint256 withdrawerBalance = players[msg.sender].balance;
-
-        console.log("withdrawer bal", withdrawerBalance);
-        console.log("winningAlliance total", winningAllianceTotalBalance);
-        console.log("Winning team spoils: ", winningTeamSpoils);
-
-        // withdrawerBalance: how much withdrawer staked to join
-        // winningTeamSpoils: all the spoils gained after looting other players
-        // winningAllianceTotalBalance: sum total that the allies staked to join
-
-        // eg. dhofBal 1 ether / winningAllianceTotalBalance 8.9 ether * winningTeamSpoils 9.9 ether
         uint256 myCut = (withdrawerBalance * winningTeamSpoils) / winningAllianceTotalBalance;
-
-        console.log("myCut: ", myCut);
 
         (bool sent, ) = msg.sender.call{ value: myCut }("");
 
@@ -518,8 +493,6 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         for (uint256 i = 0; i < winners.length; i++) {
             totalSpoils += spoils[winners[i]];
         }
-
-        console.log("calcWinningAllianceSpoils(): ", totalSpoils);
 
         winningTeamSpoils = totalSpoils;
     }
@@ -752,8 +725,6 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     }
 
     modifier onlyWinner() {
-        console.log("msg.sender ", msg.sender);
-        console.log("winner ", winnerPlayer);
         if(msg.sender != winnerPlayer) {
             revert LoserTriedWithdraw();
         }
