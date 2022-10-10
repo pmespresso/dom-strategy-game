@@ -57,16 +57,9 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     VRFCoordinatorV2Interface immutable COORDINATOR;
     LinkTokenInterface immutable LINKTOKEN;
-    address public winnerPlayer;
     uint256 public winnerAllianceId;
-    address public vrf_owner;
-    address[] public inmates;
-    address[] activePlayers;
-    bytes32 immutable vrf_keyHash;
-    uint16 immutable vrf_requestConfirmations = 3;
-    uint32 immutable vrf_callbackGasLimit = 2_500_000;
-    uint32 immutable vrf_numWords = 3;
-    uint64 public vrf_subscriptionId;
+    uint256 public fieldSize;
+    uint256 internal nextInmateId = 0;
     uint256 public randomness;
     uint256 public vrf_requestId;
     uint256 nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
@@ -76,11 +69,18 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     uint256 public activePlayersCount;
     uint256 public activeAlliances;
     uint256 public winningTeamSpoils;
-
-    uint256 public fieldSize;
     // TODO make random to prevent position sniping...?
     uint256 public nextAvailableRow = 0;
     uint256 public nextAvailableCol = 0;
+    address public vrf_owner;
+    address public winnerPlayer;
+    bytes32 immutable vrf_keyHash;
+    uint16 immutable vrf_requestConfirmations = 3;
+    uint32 immutable vrf_callbackGasLimit = 2_500_000;
+    uint32 immutable vrf_numWords = 3;
+    uint64 public vrf_subscriptionId;
+    address[] public inmates = new address[](fieldSize);
+    address[] activePlayers;
 
     error LoserTriedWithdraw();
     error OnlyWinningAllianceMember();
@@ -699,7 +699,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         player.x = jailCell.x;
         player.y = jailCell.y;
         player.inJail = true;
-        inmates.push(player.addr);
+        inmates[++nextInmateId] = player.addr;
 
         emit Jail(player.addr, inmates.length);
     }

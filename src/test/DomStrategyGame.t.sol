@@ -7,13 +7,13 @@ import "forge-std/StdJson.sol";
 import "./mocks/MockVRFCoordinatorV2.sol";
 import "../../script/HelperConfig.sol";
 import "../DomStrategyGame.sol";
-import "../Loot.sol";
+import "../BaseCharacter.sol";
 
 contract DomStrategyGameTest is Test {
     using stdStorage for StdStorage;
 
     DomStrategyGame public game;
-    Loot public loot;
+    BaseCharacter public basicCharacter;
 
     string mnemonic1 = "test test test test test test test test test test test junk";
     string mnemonic2 = "blind lesson awful swamp borrow rapid snake unique oak blue depart exercise";
@@ -63,7 +63,7 @@ contract DomStrategyGameTest is Test {
         uint96 FUND_AMOUNT = 1000 ether;
         vrfCoordinator.fundSubscription(subscriptionId, FUND_AMOUNT);
 
-        loot = new Loot();
+        basicCharacter = new BaseCharacter();
         game = new DomStrategyGame(address(vrfCoordinator), link, subscriptionId, keyHash);
 
         vrfCoordinator.addConsumer(subscriptionId, address(game));
@@ -87,15 +87,15 @@ contract DomStrategyGameTest is Test {
 
     function connect2() public {
         vm.startPrank(piskomate);
-        loot.mint(piskomate, 1);
-        loot.setApprovalForAll(address(game), true);
-        game.connect{value: 1 ether}(1, address(loot));
+        basicCharacter.mint(piskomate);
+        basicCharacter.setApprovalForAll(address(game), true);
+        game.connect{value: 1 ether}(1, address(basicCharacter));
         vm.stopPrank();
 
         vm.startPrank(dhof);
-        loot.mint(dhof, 2);
-        loot.setApprovalForAll(address(game), true);
-        game.connect{value: 6.9 ether}(2, address(loot));
+        basicCharacter.mint(dhof);
+        basicCharacter.setApprovalForAll(address(game), true);
+        game.connect{value: 6.9 ether}(2, address(basicCharacter));
         vm.stopPrank();
     }
 
@@ -103,15 +103,15 @@ contract DomStrategyGameTest is Test {
         connect2();
         
         vm.startPrank(arthur);
-        loot.mint(arthur, 3);
-        loot.setApprovalForAll(address(game), true);
-        game.connect{value: 1 ether}(3, address(loot));
+        basicCharacter.mint(arthur);
+        basicCharacter.setApprovalForAll(address(game), true);
+        game.connect{value: 1 ether}(3, address(basicCharacter));
         vm.stopPrank();
         vm.startPrank(w1nt3r);
 
-        loot.mint(w1nt3r, 4);
-        loot.setApprovalForAll(address(game), true);
-        game.connect{value: 1 ether}(4, address(loot));
+        basicCharacter.mint(w1nt3r);
+        basicCharacter.setApprovalForAll(address(game), true);
+        game.connect{value: 1 ether}(4, address(basicCharacter));
         vm.stopPrank();
     }
 
@@ -605,5 +605,103 @@ contract DomStrategyGameTest is Test {
         vm.stopPrank();
 
         require(w1nt3r.balance == 0 ether);
+    }
+
+    function testJailbreak() public {
+        connect4();
+
+        game.start();
+
+        uint256 turn = game.currentTurn() + 1;
+        bytes32 nonce1 = hex"01";
+        bytes32 nonce2 = hex"02";
+        bytes32 nonce3 = hex"03";
+        bytes32 nonce4 = hex"04";
+
+        (uint256 jailX, uint256 jailY) = game.jailCell();
+        // assume Pisko & Dhof are in jail
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(piskomate)
+            .depth(8) // x
+            .checked_write(jailX);
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(piskomate)
+            .depth(9) // y
+            .checked_write(jailY);
+
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(piskomate)
+            .depth(11) // inJail
+            .checked_write(true);
+
+        (,,,,,,,,uint x, uint y,,,bool inJail) = game.players(piskomate);
+
+        console.log(x, y, inJail);
+
+        // stdstore
+        //     .target(address(game))
+        //     .sig("players(address)")
+        //     .with_key(dhof)
+        //     .depth(8) // x
+        //     .checked_write(jailX);
+        // stdstore
+        //     .target(address(game))
+        //     .sig("players(address)")
+        //     .with_key(dhof)
+        //     .depth(9) // y
+        //     .checked_write(jailY);
+        // stdstore
+        //     .target(address(game))
+        //     .sig("players(address)")
+        //     .with_key(dhof)
+        //     .depth(12) // inJail
+        //     .checked_write(true);
+
+        // stdstore
+        //     .target(address(game))
+        //     .sig(game.inmates.selector)
+        //     .with_key(1)
+        //     .checked_write(piskomate);
+        // stdstore
+        //     .target(address(game))
+        //     .sig(game.inmates.selector)
+        //     .with_key(2)
+        //     .checked_write(dhof);
+        
+        // // let Arthur land there
+        // stdstore
+        //     .target(address(game))
+        //     .sig("players(address)")
+        //     .with_key(arthur)
+        //     .depth(8) // x
+        //     .checked_write(jailX);
+        
+        // stdstore
+        //     .target(address(game))
+        //     .sig("players(address)")
+        //     .with_key(arthur)
+        //     .depth(9) // y
+        //     .checked_write(jailY - 1);
+
+        // // Skip Pisko and Dhof calls since they in jail
+        // vm.startPrank(arthur);
+        // bytes memory call1 = abi.encodeWithSelector(DomStrategyGame.move.selector, arthur, int8(1));
+        // game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, call1)));
+        // vm.stopPrank();
+            
+        // //  w1nt3r can do wtv idc
+        // vm.startPrank(w1nt3r);
+        // bytes memory call2 = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
+        // game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, call2)));
+        // vm.stopPrank();
+        // verify everyone gets out
+
+        // next round if >=2 people stay on the jail cell they battle as normal
     }
 }
