@@ -26,7 +26,7 @@ contract DeployGame is Script {
         
         vm.startBroadcast();
 
-        DomStrategyGame game = new DomStrategyGame(vrfCoordinator, link, subscriptionId, keyHash);
+        DomStrategyGame game = new DomStrategyGame(vrfCoordinator, link, subscriptionId, keyHash, 10 minutes, block.timestamp + 10 minutes);
 
         BaseCharacter character = new BaseCharacter();
 

@@ -2,12 +2,15 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/console.sol";
+import "chainlink/v0.8/AutomationCompatible.sol";
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 import "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721Receiver.sol";
 import "chainlink/v0.8/interfaces/LinkTokenInterface.sol";
 import "chainlink/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "chainlink/v0.8/VRFConsumerBaseV2.sol";
+
+import "./GameKeeper.sol";
 
 // TODO: Pack this struct once we know all the fields
 struct Player {
@@ -40,7 +43,7 @@ struct JailCell {
     uint256 y;
 }
 
-contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
+contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBaseV2 {
     JailCell public jailCell;
     mapping(address => Player) public players;
     mapping(uint256 => Alliance) public alliances;
@@ -55,31 +58,41 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     //     0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D, 0x364C828eE171616a39897688A831c2499aD972ec, 0xBd3531dA5CF5857e7CfAA92426877b022e612cf8, 0xED5AF388653567Af2F388E6224dC7C4b3241C544, 0x8a90CAb2b38dba80c64b7734e58Ee1dB38B8992e
     // ];
 
+    // Keepers
+    uint256 public interval;
+    uint256 public lastTimestamp;
+    uint256 public gameStartTimestamp;
+    int256 public gameStartRemainingTime;
+    bool gameStarted;
+
+    // VRF
     VRFCoordinatorV2Interface immutable COORDINATOR;
     LinkTokenInterface immutable LINKTOKEN;
-    uint256 public winnerAllianceId;
-    uint256 public fieldSize;
-    uint256 internal nextInmateId = 0;
+    address public vrf_owner;
     uint256 public randomness;
     uint256 public vrf_requestId;
-    uint256 nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
+    bytes32 immutable vrf_keyHash;
+    uint16 immutable vrf_requestConfirmations = 3;
+    uint32 immutable vrf_callbackGasLimit = 2_500_000;
+    uint32 immutable vrf_numWords = 3;
+    uint64 public vrf_subscriptionId;
+
+    // Game
     uint256 public currentTurn;
     uint256 public currentTurnStartTimestamp;
     uint256 public constant maxPlayers = 100;
     uint256 public activePlayersCount;
     uint256 public activeAlliances;
     uint256 public winningTeamSpoils;
-    // TODO make random to prevent position sniping...?
-    uint256 public nextAvailableRow = 0;
+    uint256 public nextAvailableRow = 0;// TODO make random to prevent position sniping...?
     uint256 public nextAvailableCol = 0;
-    address public vrf_owner;
+    uint256 public winnerAllianceId;
+    uint256 public fieldSize;
+    uint256 internal nextInmateId = 0;
+    uint256 internal inmatesCount = 0;
+    uint256 nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
     address public winnerPlayer;
-    bytes32 immutable vrf_keyHash;
-    uint16 immutable vrf_requestConfirmations = 3;
-    uint32 immutable vrf_callbackGasLimit = 2_500_000;
-    uint32 immutable vrf_numWords = 3;
-    uint64 public vrf_subscriptionId;
-    address[] public inmates = new address[](fieldSize);
+    address[] public inmates;
     address[] activePlayers;
 
     error LoserTriedWithdraw();
@@ -105,7 +118,10 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         address indexed player,
         bytes details
     );
-
+    event NoReveal(
+        address indexed who,
+        uint256 indexed turn
+    );
     event AllianceCreated(
         address indexed admin,
         uint256 indexed allianceId,
@@ -130,15 +146,18 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
     event WinnerWithdrawSpoils(address indexed winner, uint256 indexed spoils);
     event Jail(address indexed who, uint256 indexed inmatesCount);
     event AttemptJailBreak(address indexed who, uint256 x, uint256 y);
-    event JailBreak(address indexed who);
+    event JailBreak(address indexed who, uint256 newInmatesCount);
 
     constructor(
         address _vrfCoordinator,
         address _linkToken,
         uint64 _subscriptionId,
-        bytes32 _keyHash) VRFConsumerBaseV2(_vrfCoordinator)
+        bytes32 _keyHash,
+        uint256 updateInterval,
+        uint256 _gameStartTimestamp) VRFConsumerBaseV2(_vrfCoordinator) 
     payable {
         fieldSize = maxPlayers; // also the max players
+        inmates = new address[](fieldSize);
 
         // VRF
         COORDINATOR = VRFCoordinatorV2Interface(_vrfCoordinator);
@@ -146,6 +165,12 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         vrf_keyHash = _keyHash;
         vrf_owner = msg.sender;
         vrf_subscriptionId = _subscriptionId;
+
+        // Keeper
+        interval = updateInterval;
+        lastTimestamp = block.timestamp;
+        gameStartTimestamp = _gameStartTimestamp;
+        gameStartRemainingTime = int(gameStartTimestamp - block.timestamp);
 
         emit Constructed(vrf_owner, vrf_subscriptionId);
     }
@@ -210,6 +235,8 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
         currentTurnStartTimestamp = block.timestamp;
 
         jailCell = JailCell({ x: randomness / 1e75, y: randomness % 99});
+
+        console.log("Jail Cell : ", jailCell.x, jailCell.y);
 
         emit TurnStarted(currentTurn, currentTurnStartTimestamp);
     }
@@ -288,10 +315,11 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
                 emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
 
-                sendToJail(player);
+                sendToJail(player.addr);
                 continue;
             } else if (player.pendingMoveCommitment != bytes32(0) && player.pendingMove.length == 0) { // If player submitted but forgot to reveal, move them to jail
-                sendToJail(player);
+                emit NoReveal(player.addr, turn);
+                sendToJail(player.addr);
                 // if you are in jail but your alliance wins, you still get a cut of the spoils
                 continue;
             }
@@ -306,7 +334,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                     spoils[player.addr] == player.balance;
                     emit BadMovePenalty(turn, player.addr, err);
                 } else {
-                    sendToJail(player);
+                    sendToJail(player.addr);
                 }
             }
 
@@ -318,7 +346,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
                 } else {
                     // if he dies, spoils just get added to the total winningTeamSpoils and he goes to jail
                     winningTeamSpoils += spoils[player.addr];
-                    sendToJail(player);
+                    sendToJail(player.addr);
                 }
             }
 
@@ -344,16 +372,16 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             if (i == 0) { continue; }
             if (direction == i) {
                 if (direction > 0) { // down, right
-                    newX = direction == 2 ? uint(int(invader.x) + direction - 1) : invader.x;
-                    newY = direction == 1 ? uint(int(invader.y) + direction) : invader.y;
+                    newX = direction == 2 ? uint(int(invader.x) + direction - 1) % fieldSize : invader.x;
+                    newY = direction == 1 ? uint(int(invader.y) + direction) % fieldSize : invader.y;
                     require(
                         direction == 2
                             ? newX <= fieldSize
                             : newY <= fieldSize
                         );
                 } else { // up, left
-                    newX = direction == -2 ? uint(int(invader.x) + direction + 1) : invader.x;
-                    newY = direction == -1 ? uint(int(invader.y) + direction) : invader.y;
+                    newX = direction == -2 ? uint(int(invader.x) + direction + 1)  % fieldSize : invader.x;
+                    newY = direction == -1 ? uint(int(invader.y) + direction) % fieldSize: invader.y;
                     require( 
                         direction == 1
                             ? newX >= 0
@@ -377,8 +405,10 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             invader.x = newX;
             invader.y = newY;
         }
-        playingField[invader.x][invader.y] = player;
+        // TODO: Change order after
         emit Move(invader.addr, invader.x, invader.y);
+        playingField[invader.x][invader.y] = player;
+        
     }
 
     function rest(address player) external onlyViaSubmitReveal {
@@ -549,7 +579,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             // Defender vacates current position
             playingField[defender.x][defender.y] = address(0);
             // And then moves to jail
-            sendToJail(defender);
+            sendToJail(defender.addr);
 
             // attacker takes defender's spoils
             spoils[attacker.addr] += spoils[defender.addr];
@@ -607,7 +637,7 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             // Attacker vacates current position
             playingField[attacker.x][attacker.y] = address(0);
             // And moves to jail
-            sendToJail(attacker);
+            sendToJail(attacker.addr);
 
             // Defender takes Attacker's spoils
             spoils[defender.addr] += spoils[attacker.addr];
@@ -672,36 +702,44 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
             for (uint256 i = 0; i < inmates.length; i++) {
                 address inmate = inmates[i];
                 if (inmate != address(0)) {
-                    freeFromJail(players[inmate], i);
+                    freeFromJail(inmate, i);
                 }
             }
             inmates = new address[](fieldSize); // every one broke free so just reset
         } else {
             // if lower then roller gets jailed as well lol
-            sendToJail(players[breakerOuter]);
+            sendToJail(breakerOuter);
         }
     }
 
     // N.b right now the scope is to just free if somebody lands on the cell and rolls a good number.
     // could be fun to make an option for a player to bribe (pay some amount to free just alliance members)
-    function freeFromJail(Player storage player, uint256 inmateIndex) internal {
+    function freeFromJail(address playerAddress, uint256 inmateIndex) internal {
+        Player storage player = players[playerAddress];
+
         player.hp = 50;
         player.x = jailCell.x;
         player.y = jailCell.y;
         player.inJail = false;
-        delete inmates[inmateIndex];
 
-        emit JailBreak(player.addr);
+        delete inmates[inmateIndex];
+        inmatesCount -= 1;
+
+        emit JailBreak(player.addr, inmatesCount);
     }
 
-    function sendToJail(Player storage player) internal {
+    function sendToJail(address playerAddress) internal {
+        Player storage player = players[playerAddress];
+
         player.hp = 0;
         player.x = jailCell.x;
         player.y = jailCell.y;
         player.inJail = true;
-        inmates[++nextInmateId] = player.addr;
+        inmates[nextInmateId] = player.addr;
+        nextInmateId += 1;
+        inmatesCount += 1;
 
-        emit Jail(player.addr, inmates.length);
+        emit Jail(player.addr, inmatesCount);
     }
 
     // Callbacks
@@ -774,6 +812,34 @@ contract DomStrategyGame is IERC721Receiver, VRFConsumerBaseV2 {
 
     function setOwner(address owner) public onlyOwner {
         vrf_owner = owner;
+    }
+
+     function checkUpkeep(bytes memory) public view returns (bool upkeepNeeded, bytes memory performData) {
+        upkeepNeeded = (block.timestamp - lastTimestamp) > interval;
+        performData = bytes("");
+
+        return (upkeepNeeded, performData);
+    }
+
+    function performUpkeep(bytes calldata) external {
+        (bool upkeepNeeded,) = checkUpkeep("");
+        require(upkeepNeeded, "Time interval not met.");
+        
+        lastTimestamp = block.timestamp;
+
+        if (gameStarted) {
+            uint256 turn = currentTurn + 1;
+            this.resolve(turn);
+        } else {
+            gameStartRemainingTime = int(gameStartTimestamp - block.timestamp);
+
+            // check if max players or game start time reached
+            if (activePlayersCount == maxPlayers || gameStartRemainingTime <= 0) {
+                this.start();
+                // now set interval to every 18 hours
+                interval = 18 hours;
+            }
+        }
     }
 
     function onERC721Received(

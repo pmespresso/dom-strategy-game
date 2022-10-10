@@ -2,7 +2,6 @@
 pragma solidity ^0.8.0;
 
 import "chainlink/v0.8/AutomationCompatible.sol";
-import "chainlink/v0.8/interfaces/KeeperCompatibleInterface.sol";
 
 interface IDomStrategyGame {
     function activePlayersCount() external returns (uint256);

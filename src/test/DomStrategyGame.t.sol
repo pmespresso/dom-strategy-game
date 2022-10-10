@@ -63,8 +63,11 @@ contract DomStrategyGameTest is Test {
         uint96 FUND_AMOUNT = 1000 ether;
         vrfCoordinator.fundSubscription(subscriptionId, FUND_AMOUNT);
 
+        uint256 INTERVAL = 1 minutes;
+        uint256 intendedStartTime = block.timestamp + 1 minutes;
+
         basicCharacter = new BaseCharacter();
-        game = new DomStrategyGame(address(vrfCoordinator), link, subscriptionId, keyHash);
+        game = new DomStrategyGame(address(vrfCoordinator), link, subscriptionId, keyHash, INTERVAL, intendedStartTime);
 
         vrfCoordinator.addConsumer(subscriptionId, address(game));
 
@@ -252,7 +255,7 @@ contract DomStrategyGameTest is Test {
         (,address pisko_nft,uint256 pisko_tokenId,,,,,, uint256 pisko_x, uint256 pisko_y,,,bool pisko_inJail) = game.players(piskomate);
 
         // Piskomate didn't submit at all so check confiscation
-        require(inmate0 == piskomate, "Piskomate should be sent to jail since he didn't submit or reveal");
+        require(inmate0 == piskomate || inmate1 == piskomate, "Piskomate should be sent to jail since he didn't submit or reveal");
         require(jailX == pisko_x && jailY == pisko_y && pisko_inJail == true, "Pisko position should be jail cell.");
         require(IERC721(pisko_nft).balanceOf(piskomate) == 0, "Piskomate should no longer have his Loot");
         require(IERC721(pisko_nft).ownerOf(pisko_tokenId) == address(game), "The Game should now have Piskomate's Loot");
@@ -262,7 +265,7 @@ contract DomStrategyGameTest is Test {
         // Dhof submitted but didn't reveal so just check he's in jail
         require(jailX == x && jailY == y && inJail == true, "Dhof position should be jail cell.");
         require(dhof_hp == 0, "Dhof hp should be 0 in jail.");
-        require(inmate1 == dhof, "Dhof should be sent to jail since he didn't reveal");
+        require(inmate0 == dhof || inmate1 == dhof, "Dhof should be sent to jail since he didn't reveal");
         require(IERC721(dhof_nft).balanceOf(dhof) == 1 && IERC721(dhof_nft).ownerOf(dhof_tokenId) == dhof, "Dhof should still have his NFT.");
     }
 
