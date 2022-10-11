@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.13;
 
-import "forge-std/console.sol";
 import "chainlink/v0.8/AutomationCompatible.sol";
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 import "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
@@ -235,7 +234,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
         jailCell = JailCell({ x: randomness / 1e75, y: randomness % 99});
 
-        console.log("Jail Cell : ", jailCell.x, jailCell.y);
+        // console.log("Jail Cell : ", jailCell.x, jailCell.y);
 
         emit TurnStarted(currentTurn, currentTurnStartTimestamp);
     }
@@ -264,11 +263,11 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
 
-        console.log("=== commitment ===");
-        console.logBytes32(commitment);
+        // console.log("=== commitment ===");
+        // console.logBytes32(commitment);
 
-        console.log("=== proof ===");
-        console.logBytes32(proof);
+        // console.log("=== proof ===");
+        // console.logBytes32(proof);
 
         require(commitment == proof, "No cheating");
 
@@ -472,8 +471,6 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         
         activeAlliances -= 1;
 
-        console.log("joinAlliance()...active alliances: ", activeAlliances);
-
         emit AllianceMemberJoined(players[player].allianceId, player);
     }
 
@@ -569,7 +566,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
         // Attacker goes first. There is an importance of who goes first, because if both have an effective damage enough to kill the other, the one who strikes first would win.
        if (int(defender.hp) - int(effectiveDamage1) <= 0) {// Case 2: player 2 lost
-            console.log("Attacker won");
+            // console.log("Attacker won");
             // Attacker moves to Defender's old spot
             attacker.x = defender.x;
             attacker.y = defender.y;
@@ -604,7 +601,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                     activePlayersCount -= 1;
                 }
 
-                console.log("Defender was in an alliance: ", activeAlliances);
+                // console.log("Defender was in an alliance: ", activeAlliances);
 
                 if (activeAlliances == 1) {
                     winnerAllianceId = defenderAlliance.id;
@@ -616,7 +613,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                 activeAlliances -= 1;
 
                 Alliance storage attackerAlliance = alliances[attacker.allianceId];
-                console.log("Defender was NOT in an alliance: ", activeAlliances);
+                // console.log("Defender was NOT in an alliance: ", activeAlliances);
                 if (activePlayersCount == 1) {
                     // win condition
                     winnerPlayer = attacker.addr;
@@ -630,7 +627,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                 }
             }
         } else if (int(attacker.hp) - int(effectiveDamage2) <= 0) {
-            console.log("Defender won");
+            // console.log("Defender won");
             // Defender remains where he is, Attack goes to jail
 
             // Attacker vacates current position
@@ -678,7 +675,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                 }
             }
         } else {
-            console.log("Neither lost");
+            // console.log("Neither lost");
             attacker.hp -= effectiveDamage2;
             defender.hp -= effectiveDamage1;
         }
