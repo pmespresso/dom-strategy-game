@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.13;
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.17;
 
 import "forge-std/Test.sol";
 import "forge-std/StdJson.sol";
@@ -32,6 +32,7 @@ contract DomStrategyGameTest is Test {
 
     HelperConfig helper = new HelperConfig();
     MockVRFCoordinatorV2 vrfCoordinator;
+    uint256 INTERVAL = 1 minutes;
 
     function setUp() public {
         (
@@ -63,8 +64,7 @@ contract DomStrategyGameTest is Test {
         uint96 FUND_AMOUNT = 1000 ether;
         vrfCoordinator.fundSubscription(subscriptionId, FUND_AMOUNT);
 
-        uint256 INTERVAL = 1 minutes;
-        uint256 intendedStartTime = block.timestamp + 1 minutes;
+        uint256 intendedStartTime = block.timestamp + INTERVAL;
 
         basicCharacter = new BaseCharacter();
         game = new DomStrategyGame(address(vrfCoordinator), link, subscriptionId, keyHash, INTERVAL, intendedStartTime);
@@ -184,7 +184,7 @@ contract DomStrategyGameTest is Test {
         bytes32 nonce2 = hex"02";
         uint256 turn = 1;
 
-        // To make a move, you submit a hash of the intended move with the current turn, a nonce, and a call to either move or rest. Everyone's move is collected and then revealed at once after 18 hours
+        // To make a move, you submit a hash of the intended move with the current turn, a nonce, and a call to either move or rest. Everyone's move is collected and then revealed at once after INTERVAL
         vm.prank(piskomate);
         bytes memory call1 = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
 
@@ -199,8 +199,8 @@ contract DomStrategyGameTest is Test {
 
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, call2)));
 
-        // every 18 hours all players need to reveal their respective move for that turn.
-        vm.warp(block.timestamp + 19 hours);
+        // every INTERVAL all players need to reveal their respective move for that turn.
+        vm.warp(block.timestamp +  INTERVAL + (INTERVAL/4));
 
         revealAndResolve2P(turn, nonce1, nonce2, call1, call2);
 
@@ -237,7 +237,7 @@ contract DomStrategyGameTest is Test {
         );
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, call2)));
 
-        vm.warp(block.timestamp + 19 hours);
+        vm.warp(block.timestamp +  INTERVAL + (INTERVAL/4));
 
         // Dhof doesn't reveal....
 
@@ -324,7 +324,7 @@ contract DomStrategyGameTest is Test {
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, dhofRest)));
         vm.stopPrank();
 
-        vm.warp(block.timestamp + 19 hours);
+        vm.warp(block.timestamp +  INTERVAL + (INTERVAL/4));
 
         revealAndResolve2P(turn, nonce1, nonce2, piskomateMoveUp, dhofRest);
 
@@ -371,7 +371,7 @@ contract DomStrategyGameTest is Test {
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, dhofRest)));
         vm.stopPrank();
 
-        vm.warp(block.timestamp + 19 hours);
+        vm.warp(block.timestamp +  INTERVAL + (INTERVAL/4));
 
         revealAndResolve2P(turn, nonce3, nonce4, piskomateMoveUpAgain, dhofRestAgain);
         
@@ -464,7 +464,7 @@ contract DomStrategyGameTest is Test {
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, w1nt3rRest)));
         vm.stopPrank();
 
-        vm.warp(block.timestamp + 19 hours);
+        vm.warp(block.timestamp +  INTERVAL + (INTERVAL/4));
         
         revealAndResolve4P(turn, nonce1, nonce2, nonce3, nonce4, piskomateRest, dhofRest, arthurCreateAlliance, w1nt3rRest);
 
@@ -507,7 +507,7 @@ contract DomStrategyGameTest is Test {
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce8, w1nt3rMove)));
         vm.stopPrank();
 
-        vm.warp(block.timestamp + 19 hours);
+        vm.warp(block.timestamp + INTERVAL + (INTERVAL/4));
 
         revealAndResolve4P(turn, nonce5, nonce6, nonce7, nonce8, piskomateJoin, dhofJoin, arthurRest, w1nt3rMove);
 
@@ -573,7 +573,7 @@ contract DomStrategyGameTest is Test {
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce12, w1nt3rRestAgain)));
         vm.stopPrank();
 
-        vm.warp(block.timestamp + 19 hours);
+        vm.warp(block.timestamp + INTERVAL + (INTERVAL/4));
         revealAndResolve4P(turn, nonce9, nonce10, nonce11, nonce12, piskomateRestAgain, dhofRestAgain, arthurMoveAgain, w1nt3rRestAgain);
 
         // make sure alliance splits the spoils proportionately to their staked balance
@@ -664,7 +664,7 @@ contract DomStrategyGameTest is Test {
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, w1nt3rCall)));
         vm.stopPrank();
         
-        vm.warp(block.timestamp + 19 hours);
+        vm.warp(block.timestamp + INTERVAL + (INTERVAL/4));
 
         revealAndResolve4P(turn, nonce1, nonce2, nonce3, nonce4, piskomateCall, dhofCall, arthurCall, w1nt3rCall);
         // verify everyones gets out

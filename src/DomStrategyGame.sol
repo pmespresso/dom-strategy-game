@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.13;
+pragma solidity 0.8.17;
 
 import "chainlink/v0.8/AutomationCompatible.sol";
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
@@ -8,8 +8,6 @@ import "openzeppelin-contracts/contracts/token/ERC721/IERC721Receiver.sol";
 import "chainlink/v0.8/interfaces/LinkTokenInterface.sol";
 import "chainlink/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "chainlink/v0.8/VRFConsumerBaseV2.sol";
-
-import "./GameKeeper.sol";
 
 // TODO: Pack this struct once we know all the fields
 struct Player {
@@ -223,7 +221,6 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         emit Joined(msg.sender);
     }
 
-    // N.B. called by GameKeeper.sol
     function start() external {
         require(currentTurn == 0, "Already started");
         require(activePlayersCount > 1, "No players");
@@ -242,8 +239,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     function submit(uint256 turn, bytes32 commitment) external {
         require(currentTurn > 0, "Not started");
         require(turn == currentTurn, "Stale tx");
-        // submit stage is 18 hours
-        require(block.timestamp <= currentTurnStartTimestamp + 18 hours);
+        // submit stage is interval set by deployer
+        require(block.timestamp <= currentTurnStartTimestamp + interval);
 
         players[msg.sender].pendingMoveCommitment = commitment;
 
@@ -256,9 +253,9 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         bytes calldata data
     ) external {
         require(turn == currentTurn, "Stale tx");
-        // then another 18 hours for the reveal stage
-        require(block.timestamp > currentTurnStartTimestamp + 18 hours);
-        require(block.timestamp < currentTurnStartTimestamp + 36 hours);
+        // then another interval for the reveal stage
+        require(block.timestamp > currentTurnStartTimestamp + interval);
+        require(block.timestamp < currentTurnStartTimestamp + interval * 2);
 
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
@@ -279,7 +276,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     // N.B. roll dice should be done by Chainlink Keeprs
     function rollDice(uint256 turn) public {
         require(turn == currentTurn, "Stale tx");
-        require(block.timestamp > currentTurnStartTimestamp + 18 hours);
+        require(block.timestamp > currentTurnStartTimestamp + interval);
 
         requestRandomWords();
     }
@@ -289,7 +286,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     function resolve(uint256 turn) external {
         require(turn == currentTurn, "Stale tx");
         require(randomness != 0, "Roll the die first");
-        require(block.timestamp > currentTurnStartTimestamp + 18 hours);
+        require(block.timestamp > currentTurnStartTimestamp + interval);
 
         if (turn % 5 == 0) {
             fieldSize -= 2;
@@ -812,7 +809,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     }
 
      function checkUpkeep(bytes memory) public view returns (bool upkeepNeeded, bytes memory performData) {
-        upkeepNeeded = (block.timestamp - lastTimestamp) > interval;
+        upkeepNeeded = (block.timestamp - lastTimestamp) >= interval;
         performData = bytes("");
 
         return (upkeepNeeded, performData);
@@ -833,8 +830,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
             // check if max players or game start time reached
             if (activePlayersCount == maxPlayers || gameStartRemainingTime <= 0) {
                 this.start();
-                // now set interval to every 18 hours
-                interval = 18 hours;
+                // now set interval to every interval
+                interval = interval;
             }
         }
     }
