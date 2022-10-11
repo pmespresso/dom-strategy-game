@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "chainlink/v0.8/interfaces/KeeperCompatibleInterface.sol";
+import "chainlink/v0.8/AutomationCompatible.sol";
 
 interface IDomStrategyGame {
     function activePlayersCount() external returns (uint256);
@@ -11,7 +11,7 @@ interface IDomStrategyGame {
     function resolve(uint256 turn) external;
 }
 
-contract GameKeeper is KeeperCompatibleInterface {
+contract GameKeeper is AutomationCompatible {
     uint256 public interval;
     uint256 public lastTimestamp;
     uint256 public gameStartTimestamp;

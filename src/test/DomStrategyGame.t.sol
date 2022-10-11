@@ -7,13 +7,13 @@ import "forge-std/StdJson.sol";
 import "./mocks/MockVRFCoordinatorV2.sol";
 import "../../script/HelperConfig.sol";
 import "../DomStrategyGame.sol";
-import "../Loot.sol";
+import "../BaseCharacter.sol";
 
 contract DomStrategyGameTest is Test {
     using stdStorage for StdStorage;
 
     DomStrategyGame public game;
-    Loot public loot;
+    BaseCharacter public basicCharacter;
 
     string mnemonic1 = "test test test test test test test test test test test junk";
     string mnemonic2 = "blind lesson awful swamp borrow rapid snake unique oak blue depart exercise";
@@ -63,8 +63,11 @@ contract DomStrategyGameTest is Test {
         uint96 FUND_AMOUNT = 1000 ether;
         vrfCoordinator.fundSubscription(subscriptionId, FUND_AMOUNT);
 
-        loot = new Loot();
-        game = new DomStrategyGame(address(vrfCoordinator), link, subscriptionId, keyHash);
+        uint256 INTERVAL = 1 minutes;
+        uint256 intendedStartTime = block.timestamp + 1 minutes;
+
+        basicCharacter = new BaseCharacter();
+        game = new DomStrategyGame(address(vrfCoordinator), link, subscriptionId, keyHash, INTERVAL, intendedStartTime);
 
         vrfCoordinator.addConsumer(subscriptionId, address(game));
 
@@ -87,15 +90,15 @@ contract DomStrategyGameTest is Test {
 
     function connect2() public {
         vm.startPrank(piskomate);
-        loot.mint(piskomate, 1);
-        loot.setApprovalForAll(address(game), true);
-        game.connect{value: 1 ether}(1, address(loot));
+        basicCharacter.mint(piskomate);
+        basicCharacter.setApprovalForAll(address(game), true);
+        game.connect{value: 1 ether}(1, address(basicCharacter));
         vm.stopPrank();
 
         vm.startPrank(dhof);
-        loot.mint(dhof, 2);
-        loot.setApprovalForAll(address(game), true);
-        game.connect{value: 6.9 ether}(2, address(loot));
+        basicCharacter.mint(dhof);
+        basicCharacter.setApprovalForAll(address(game), true);
+        game.connect{value: 6.9 ether}(2, address(basicCharacter));
         vm.stopPrank();
     }
 
@@ -103,15 +106,15 @@ contract DomStrategyGameTest is Test {
         connect2();
         
         vm.startPrank(arthur);
-        loot.mint(arthur, 3);
-        loot.setApprovalForAll(address(game), true);
-        game.connect{value: 1 ether}(3, address(loot));
+        basicCharacter.mint(arthur);
+        basicCharacter.setApprovalForAll(address(game), true);
+        game.connect{value: 1 ether}(3, address(basicCharacter));
         vm.stopPrank();
         vm.startPrank(w1nt3r);
 
-        loot.mint(w1nt3r, 4);
-        loot.setApprovalForAll(address(game), true);
-        game.connect{value: 1 ether}(4, address(loot));
+        basicCharacter.mint(w1nt3r);
+        basicCharacter.setApprovalForAll(address(game), true);
+        game.connect{value: 1 ether}(4, address(basicCharacter));
         vm.stopPrank();
     }
 
@@ -146,7 +149,7 @@ contract DomStrategyGameTest is Test {
         vm.prank(w1nt3r);
         game.reveal(turn, nonce4, call4);
 
-        // N.B. roll dice, resolve should be done by Chainlink Keeprs
+        // TODO: roll dice, resolve should be done by Chainlink Keeprs
         game.rollDice(turn);
         vrfCoordinator.fulfillRandomWords(
             game.vrf_requestId(),
@@ -183,18 +186,17 @@ contract DomStrategyGameTest is Test {
 
         // To make a move, you submit a hash of the intended move with the current turn, a nonce, and a call to either move or rest. Everyone's move is collected and then revealed at once after 18 hours
         vm.prank(piskomate);
-        bytes memory call1 = abi.encodeWithSelector(
-            DomStrategyGame.rest.selector,
-            piskomate
-        );
+        bytes memory call1 = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
+
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, call1)));
         
         vm.prank(dhof);
         bytes memory call2 = abi.encodeWithSelector(
             DomStrategyGame.move.selector,
             dhof,
-            int8(4)
+            int8(2)
         );
+
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, call2)));
 
         // every 18 hours all players need to reveal their respective move for that turn.
@@ -206,7 +208,7 @@ contract DomStrategyGameTest is Test {
         (,,,,,,uint256 hp_dhof,,uint256 x_dhof,uint256 y_dhof,bytes32 pendingMoveCommitment_dhof,,) = game.players(dhof);
 
         require(x_piskomate == 0 && y_piskomate == 0, "piskomate should have remained in place from rest()");
-        require(x_dhof == 3 && y_dhof == 0, "Dhof should have moved right one square from move(4)");
+        require(x_dhof == 3 && y_dhof == 0, "Dhof should have moved right one square from move(dhof, 2)");
         require(game.playingField(3, 0) == dhof, "Playing field should record dhof new position");
         require(game.playingField(0, 0) == piskomate, "Playing field should record piskomate new position");
         require(hp_dhof == 1000, "piskomate should have recovered 2 hp from rest()");
@@ -231,7 +233,7 @@ contract DomStrategyGameTest is Test {
         bytes memory call2 = abi.encodeWithSelector(
             DomStrategyGame.move.selector,
             dhof,
-            int8(4)
+            int8(2)
         );
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, call2)));
 
@@ -253,7 +255,7 @@ contract DomStrategyGameTest is Test {
         (,address pisko_nft,uint256 pisko_tokenId,,,,,, uint256 pisko_x, uint256 pisko_y,,,bool pisko_inJail) = game.players(piskomate);
 
         // Piskomate didn't submit at all so check confiscation
-        require(inmate0 == piskomate, "Piskomate should be sent to jail since he didn't submit or reveal");
+        require(inmate0 == piskomate || inmate1 == piskomate, "Piskomate should be sent to jail since he didn't submit or reveal");
         require(jailX == pisko_x && jailY == pisko_y && pisko_inJail == true, "Pisko position should be jail cell.");
         require(IERC721(pisko_nft).balanceOf(piskomate) == 0, "Piskomate should no longer have his Loot");
         require(IERC721(pisko_nft).ownerOf(pisko_tokenId) == address(game), "The Game should now have Piskomate's Loot");
@@ -263,7 +265,7 @@ contract DomStrategyGameTest is Test {
         // Dhof submitted but didn't reveal so just check he's in jail
         require(jailX == x && jailY == y && inJail == true, "Dhof position should be jail cell.");
         require(dhof_hp == 0, "Dhof hp should be 0 in jail.");
-        require(inmate1 == dhof, "Dhof should be sent to jail since he didn't reveal");
+        require(inmate0 == dhof || inmate1 == dhof, "Dhof should be sent to jail since he didn't reveal");
         require(IERC721(dhof_nft).balanceOf(dhof) == 1 && IERC721(dhof_nft).ownerOf(dhof_tokenId) == dhof, "Dhof should still have his NFT.");
     }
 
@@ -296,7 +298,7 @@ contract DomStrategyGameTest is Test {
         game.setPlayingField(4, 5, piskomate);
         
         vm.startPrank(piskomate);
-        bytes memory piskomateMoveUp = abi.encodeWithSelector(DomStrategyGame.move.selector, piskomate, int8(1));
+        bytes memory piskomateMoveUp = abi.encodeWithSelector(DomStrategyGame.move.selector, piskomate, int8(-1));
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, piskomateMoveUp)));
         vm.stopPrank();
 
@@ -360,7 +362,7 @@ contract DomStrategyGameTest is Test {
 
         // piskomate didn't manage to kill dhof last round, he moves again to where he thinks dhof again to finish the job.
         vm.startPrank(piskomate);
-        bytes memory piskomateMoveUpAgain = abi.encodeWithSelector(DomStrategyGame.move.selector, piskomate, int8(1));
+        bytes memory piskomateMoveUpAgain = abi.encodeWithSelector(DomStrategyGame.move.selector, piskomate, int8(-1));
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, piskomateMoveUpAgain)));
         vm.stopPrank();
 
@@ -501,7 +503,7 @@ contract DomStrategyGameTest is Test {
         // 1 stay out
         // W1nt3r doens't join but instead moves in position to attack Arthur
         vm.startPrank(w1nt3r);
-        bytes memory w1nt3rMove = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(3));
+        bytes memory w1nt3rMove = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(-2));
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce8, w1nt3rMove)));
         vm.stopPrank();
 
@@ -562,7 +564,7 @@ contract DomStrategyGameTest is Test {
         
         // let Arthur win the battle against W1nt3r, so his Alliance wins the game
         vm.startPrank(arthur);
-        bytes memory arthurMoveAgain = abi.encodeWithSelector(DomStrategyGame.move.selector, arthur, int8(4));
+        bytes memory arthurMoveAgain = abi.encodeWithSelector(DomStrategyGame.move.selector, arthur, int8(2));
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce11, arthurMoveAgain)));
         vm.stopPrank();
         
@@ -606,5 +608,67 @@ contract DomStrategyGameTest is Test {
         vm.stopPrank();
 
         require(w1nt3r.balance == 0 ether);
+    }
+
+    function testJailbreak() public {
+        connect4();
+
+        uint256 turn = game.currentTurn() + 1;
+        bytes32 nonce1 = hex"01";
+        bytes32 nonce2 = hex"02";
+        bytes32 nonce3 = hex"03";
+        bytes32 nonce4 = hex"04";
+
+        game.start();
+
+        (uint256 jailX, uint256 jailY) = game.jailCell();
+        // assume Pisko & Dhof are in jail
+        // TODO: this whould be an internal function
+        game.sendToJail(dhof);
+        game.sendToJail(piskomate);
+        
+        
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(arthur)
+            .depth(8) // x
+            .checked_write(jailX);
+        
+        stdstore
+            .target(address(game))
+            .sig("players(address)")
+            .with_key(arthur)
+            .depth(9) // y
+            .checked_write(jailY - 1);
+
+        vm.startPrank(piskomate);
+        bytes memory piskomateCall = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, piskomateCall)));
+        vm.stopPrank();
+
+        vm.startPrank(dhof);
+        bytes memory dhofCall = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, dhofCall)));
+        vm.stopPrank();
+
+        // let Arthur land on jail cell
+        vm.startPrank(arthur);
+        bytes memory arthurCall = abi.encodeWithSelector(DomStrategyGame.move.selector, arthur, int8(1));
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, arthurCall)));
+        vm.stopPrank();
+            
+        //  w1nt3r can do wtv idc
+        vm.startPrank(w1nt3r);
+        bytes memory w1nt3rCall = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, w1nt3rCall)));
+        vm.stopPrank();
+        
+        vm.warp(block.timestamp + 19 hours);
+
+        revealAndResolve4P(turn, nonce1, nonce2, nonce3, nonce4, piskomateCall, dhofCall, arthurCall, w1nt3rCall);
+        // verify everyones gets out
+
+        // next round if >=2 people stay on the jail cell they battle as normal
     }
 }

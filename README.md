@@ -34,7 +34,7 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 
 - [x] Players are initially spawned on 2D grid map in random starting spots. All starting spots are equidistant from one another.
 - [x] You can [MOVE] to one adjacent grid spot per turn. You can also [REST] in the grid spot you currently occupy.
-- [ ] Grid spots can reveal two things the firs time they are encountered:
+- [ ] Grid spots can reveal two things the first time they are encountered:
   - **Resources** which are picked up immediately and can be used to level up and train the character
   - **Effects** which are either continuous (Passive AOE), or triggered (provies additional [ABILITY] that can be used during a turn).
   - **Enemies** some other player who is already occupying the square (in which case you gotta battle it out)
@@ -46,7 +46,7 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 - [x] If allies, don't fight
 <!-- - Losing player is removed from map, permanently loses spoils to the winner -->
 - [x] Losing player is moved to a "jail" cell, which is hidden from the players (only contract can view)
-- [ ] If someone accidentally lands on the jail cell, they can roll dice to jailbreak (e.g. if their alliance members are in there).
+- [x] If someone accidentally lands on the jail cell, they can roll dice to jailbreak (e.g. if their alliance members are in there).
 - [ ] If more than 2 on same grid slot, random 2 are chosen for battle.
 - [ ] (**editor's comment**: possibly multiples of 2 can be chosen and the lucky(?) odd one sits out)
 

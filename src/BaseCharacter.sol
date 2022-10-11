@@ -4,16 +4,23 @@ pragma solidity ^0.8.13;
 import "solmate/tokens/ERC721.sol";
 import "openzeppelin-contracts/contracts/utils/Strings.sol";
 
-contract Loot is ERC721 {
+contract BaseCharacter is ERC721 {
     using Strings for uint256;
 
     string baseURI;
+    uint256 currentTokenId;
+    
+    mapping (address => uint256[]) public tokensOwnedBy;
     
     error NonExistentTokenUri();
-    constructor() ERC721("Loot", "Loot") {}
+    constructor() ERC721("Domination Character Base", "DOM") {
+        currentTokenId = 1;
+    }
 
-    function mint(address to, uint256 tokenId) external {
-        _mint(to, tokenId);
+    function mint(address to) external {
+        _mint(to, currentTokenId);
+        currentTokenId += 1;
+        tokensOwnedBy[to].push(currentTokenId);
     }
 
     function tokenURI(uint256 tokenId) public view virtual override returns (string memory) {
