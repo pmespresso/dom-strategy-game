@@ -22,8 +22,8 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 
 #### Turns
 
-- [ ] Turn based, 1 turn every 36 hours (must deploy to impl)
-  - [ ] (**editor's commment**: 36 hours eh? seems not very engaging...also a game gonna take fucking forever...also will need notifications so 90% of players don't just disappear after a couple moves)
+- [x] Turn based, 1 turn every 36 hours
+  - (**editor's commment**: 36 hours eh? seems not very engaging...also a game gonna take fucking forever...also will need notifications so 90% of players don't just disappear after a couple moves)
   - [x] Submit stage (18 hours): Make your move and submit a hash of it to initiall hide from other players
   - [x] Reveal stage (18 hours); Submit plaintext version of your move and its password to reveal it
     - [x] If you submit and forget to reveal your move you are penalized by getting sent to jail
@@ -46,7 +46,7 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 - [x] If allies, don't fight
 <!-- - Losing player is removed from map, permanently loses spoils to the winner -->
 - [x] Losing player is moved to a "jail" cell, which is hidden from the players (only contract can view)
-- [ ] If someone accidentally lands on the jail cell, they can roll dice to jailbreak (e.g. if their alliance members are in there).
+- [x] If someone accidentally lands on the jail cell, they can roll dice to jailbreak (e.g. if their alliance members are in there).
 - [ ] If more than 2 on same grid slot, random 2 are chosen for battle.
 - [ ] (**editor's comment**: possibly multiples of 2 can be chosen and the lucky(?) odd one sits out)
 
@@ -56,7 +56,7 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 - [x] The player who forms the alliances is the **leader** and has sole rights over accepting or ignoring applications. (**editor's comment**: might be an interesting place to attach a mini-dao like structure to vote in / kick members)
 - [x] Players in an alliance will not attack each other then occupying the same slot.
 - [x] If an alliance wins, all of the spoils between the players in the alliance are split proportionately to what they put up at stake.
-- [ ] (**editors'comment**: are battles fought with a representative of the alliance or the cumulative stats of the alliance?)
+-  (**editors'comment**: are battles fought with a representative of the alliance or the cumulative stats of the alliance?)
 - [x] Players can only be in 1 alliance
 - [x] Alliances have a max membership count (TBD, based on intended total number of players)
 - [x] N.B. Pseudo "superalliances" can still be formed outside of the game through social contracts or smart contracts. But cannot guarantee there won't be betrayals. (**editor's comment** Strategic/Tactical betrayal is a fun component of any good strategy game :D)
@@ -66,7 +66,7 @@ Finished(?) by [@pmespresso](https://github.com/pmespresso)
 - [x] Last player
 - [x] Last alliance standing
 - [x] At this point the winers may withdraw their spoils
-- [ ] (**editor's comment**: In order to add more chaos and tact in choosing your allies, if an alliance is the last standing, they could anonymously vote to continue as FFA, or be satisfied with splitting the spoils.)
+-  (**editor's comment**: In order to add more chaos and tact in choosing your allies, if an alliance is the last standing, they could anonymously vote to continue as FFA, or be satisfied with splitting the spoils.)
 
 #### Miscellaneous
 
