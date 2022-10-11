@@ -149,7 +149,7 @@ contract DomStrategyGameTest is Test {
         vm.prank(w1nt3r);
         game.reveal(turn, nonce4, call4);
 
-        // N.B. roll dice, resolve should be done by Chainlink Keeprs
+        // TODO: roll dice, resolve should be done by Chainlink Keeprs
         game.rollDice(turn);
         vrfCoordinator.fulfillRandomWords(
             game.vrf_requestId(),
@@ -613,97 +613,61 @@ contract DomStrategyGameTest is Test {
     function testJailbreak() public {
         connect4();
 
-        game.start();
-
         uint256 turn = game.currentTurn() + 1;
         bytes32 nonce1 = hex"01";
         bytes32 nonce2 = hex"02";
         bytes32 nonce3 = hex"03";
         bytes32 nonce4 = hex"04";
 
+        game.start();
+
         (uint256 jailX, uint256 jailY) = game.jailCell();
         // assume Pisko & Dhof are in jail
+        // TODO: this whould be an internal function
+        game.sendToJail(dhof);
+        game.sendToJail(piskomate);
+        
+        
         stdstore
             .target(address(game))
             .sig("players(address)")
-            .with_key(piskomate)
+            .with_key(arthur)
             .depth(8) // x
             .checked_write(jailX);
+        
         stdstore
             .target(address(game))
             .sig("players(address)")
-            .with_key(piskomate)
+            .with_key(arthur)
             .depth(9) // y
-            .checked_write(jailY);
+            .checked_write(jailY - 1);
 
-        stdstore
-            .target(address(game))
-            .sig("players(address)")
-            .with_key(piskomate)
-            .depth(11) // inJail
-            .checked_write(true);
+        vm.startPrank(piskomate);
+        bytes memory piskomateCall = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, piskomateCall)));
+        vm.stopPrank();
 
-        (,,,,,,,,uint x, uint y,,,bool inJail) = game.players(piskomate);
+        vm.startPrank(dhof);
+        bytes memory dhofCall = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, dhofCall)));
+        vm.stopPrank();
 
-        console.log(x, y, inJail);
-
-        // stdstore
-        //     .target(address(game))
-        //     .sig("players(address)")
-        //     .with_key(dhof)
-        //     .depth(8) // x
-        //     .checked_write(jailX);
-        // stdstore
-        //     .target(address(game))
-        //     .sig("players(address)")
-        //     .with_key(dhof)
-        //     .depth(9) // y
-        //     .checked_write(jailY);
-        // stdstore
-        //     .target(address(game))
-        //     .sig("players(address)")
-        //     .with_key(dhof)
-        //     .depth(12) // inJail
-        //     .checked_write(true);
-
-        // stdstore
-        //     .target(address(game))
-        //     .sig(game.inmates.selector)
-        //     .with_key(1)
-        //     .checked_write(piskomate);
-        // stdstore
-        //     .target(address(game))
-        //     .sig(game.inmates.selector)
-        //     .with_key(2)
-        //     .checked_write(dhof);
-        
-        // // let Arthur land there
-        // stdstore
-        //     .target(address(game))
-        //     .sig("players(address)")
-        //     .with_key(arthur)
-        //     .depth(8) // x
-        //     .checked_write(jailX);
-        
-        // stdstore
-        //     .target(address(game))
-        //     .sig("players(address)")
-        //     .with_key(arthur)
-        //     .depth(9) // y
-        //     .checked_write(jailY - 1);
-
-        // // Skip Pisko and Dhof calls since they in jail
-        // vm.startPrank(arthur);
-        // bytes memory call1 = abi.encodeWithSelector(DomStrategyGame.move.selector, arthur, int8(1));
-        // game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, call1)));
-        // vm.stopPrank();
+        // let Arthur land on jail cell
+        vm.startPrank(arthur);
+        bytes memory arthurCall = abi.encodeWithSelector(DomStrategyGame.move.selector, arthur, int8(1));
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, arthurCall)));
+        vm.stopPrank();
             
-        // //  w1nt3r can do wtv idc
-        // vm.startPrank(w1nt3r);
-        // bytes memory call2 = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
-        // game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, call2)));
-        // vm.stopPrank();
-        // verify everyone gets out
+        //  w1nt3r can do wtv idc
+        vm.startPrank(w1nt3r);
+        bytes memory w1nt3rCall = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, w1nt3rCall)));
+        vm.stopPrank();
+        
+        vm.warp(block.timestamp + 19 hours);
+
+        revealAndResolve4P(turn, nonce1, nonce2, nonce3, nonce4, piskomateCall, dhofCall, arthurCall, w1nt3rCall);
+        // verify everyones gets out
 
         // next round if >=2 people stay on the jail cell they battle as normal
     }

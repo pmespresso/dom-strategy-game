@@ -92,7 +92,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     uint256 internal inmatesCount = 0;
     uint256 nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
     address public winnerPlayer;
-    address[] public inmates;
+    address[] public inmates = new address[](maxPlayers);
     address[] activePlayers;
 
     error LoserTriedWithdraw();
@@ -157,7 +157,6 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         uint256 _gameStartTimestamp) VRFConsumerBaseV2(_vrfCoordinator) 
     payable {
         fieldSize = maxPlayers; // also the max players
-        inmates = new address[](fieldSize);
 
         // VRF
         COORDINATOR = VRFCoordinatorV2Interface(_vrfCoordinator);
@@ -265,11 +264,11 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
 
-        // console.log("=== commitment ===");
-        // console.logBytes32(commitment);
+        console.log("=== commitment ===");
+        console.logBytes32(commitment);
 
-        // console.log("=== proof ===");
-        // console.logBytes32(proof);
+        console.log("=== proof ===");
+        console.logBytes32(proof);
 
         require(commitment == proof, "No cheating");
 
@@ -705,7 +704,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                     freeFromJail(inmate, i);
                 }
             }
-            inmates = new address[](fieldSize); // every one broke free so just reset
+            inmates = new address[](maxPlayers); // everyone broke free so just reset
         } else {
             // if lower then roller gets jailed as well lol
             sendToJail(breakerOuter);
@@ -728,7 +727,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         emit JailBreak(player.addr, inmatesCount);
     }
 
-    function sendToJail(address playerAddress) internal {
+    // TODO: Make internal 
+    function sendToJail(address playerAddress) public {
         Player storage player = players[playerAddress];
 
         player.hp = 0;
