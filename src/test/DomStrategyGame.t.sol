@@ -728,9 +728,14 @@ contract DomStrategyGameTest is Test {
         assert(game.currentTurn() == 1);
     }
 
-    function testFuzzingExample(bytes memory variant) public {
-        // We expect this to fail, no matter how different the input is!
-        vm.expectRevert(bytes("Time interval not met."));
-        game.performUpkeep(variant);
-    }
+    // function testFuzzingExample(bytes memory variant) public {
+    //     stdstore
+    //         .target(address(game))
+    //         .sig("gameStarted")
+    //         .checked_write(true);
+
+    //     // We expect this to fail, no matter how different the input is!
+    //     vm.expectRevert(bytes("Time interval not met."));
+    //     game.performUpkeep(variant);
+    // }
 }
