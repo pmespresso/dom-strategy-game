@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.17;
 
-import "chainlink/v0.8/AutomationCompatible.sol";
+import "forge-std/console.sol";
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 import "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721Receiver.sol";
+import "chainlink/v0.8/AutomationCompatible.sol";
 import "chainlink/v0.8/interfaces/LinkTokenInterface.sol";
 import "chainlink/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "chainlink/v0.8/VRFConsumerBaseV2.sol";
@@ -59,8 +60,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     uint256 public interval;
     uint256 public lastTimestamp;
     uint256 public gameStartTimestamp;
-    int256 public gameStartRemainingTime;
-    bool gameStarted;
+    bool public gameStarted;
 
     // VRF
     VRFCoordinatorV2Interface immutable COORDINATOR;
@@ -96,7 +96,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     error OnlyWinningAllianceMember();
 
     event ReturnedRandomness(uint256[] randomWords);
-    event Constructed(address owner, uint64 subscriptionId);
+    event Constructed(address indexed owner, uint64 indexed subscriptionId, uint256 indexed _gameStartTimestamp);
     event Joined(address indexed addr);
     event TurnStarted(uint256 indexed turn, uint256 timestamp);
     event Submitted(
@@ -166,9 +166,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         interval = updateInterval;
         lastTimestamp = block.timestamp;
         gameStartTimestamp = _gameStartTimestamp;
-        gameStartRemainingTime = int(gameStartTimestamp - block.timestamp);
 
-        emit Constructed(vrf_owner, vrf_subscriptionId);
+        emit Constructed(vrf_owner, vrf_subscriptionId, _gameStartTimestamp);
     }
 
     function init() external {
@@ -221,13 +220,14 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         emit Joined(msg.sender);
     }
 
-    function start() external {
+    function start() public {
         require(currentTurn == 0, "Already started");
         require(activePlayersCount > 1, "No players");
         require(randomness != 0, "Need randomness for jail cell");
 
         currentTurn = 1;
         currentTurnStartTimestamp = block.timestamp;
+        gameStarted = true;
 
         jailCell = JailCell({ x: randomness / 1e75, y: randomness % 99});
 
@@ -283,7 +283,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
     // The turns are processed in random order. The contract offloads sorting the players
     // list off-chain to save gas
-    function resolve(uint256 turn) external {
+    function resolve(uint256 turn) public {
         require(turn == currentTurn, "Stale tx");
         require(randomness != 0, "Roll the die first");
         require(block.timestamp > currentTurnStartTimestamp + interval);
@@ -816,22 +816,23 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     }
 
     function performUpkeep(bytes calldata) external {
-        (bool upkeepNeeded,) = checkUpkeep("");
-        require(upkeepNeeded, "Time interval not met.");
-        
         lastTimestamp = block.timestamp;
-
         if (gameStarted) {
+            (bool upkeepNeeded,) = checkUpkeep("");
+            require(upkeepNeeded, "Time interval not met.");
+            
             uint256 turn = currentTurn + 1;
-            this.resolve(turn);
+            rollDice(turn);
+            resolve(turn);
         } else {
-            gameStartRemainingTime = int(gameStartTimestamp - block.timestamp);
-
             // check if max players or game start time reached
-            if (activePlayersCount == maxPlayers || gameStartRemainingTime <= 0) {
-                this.start();
-                // now set interval to every interval
-                interval = interval;
+            if (activePlayersCount == maxPlayers || gameStartTimestamp <= block.timestamp) {
+                if (activePlayersCount >= 2) {
+                    start();
+                } else {
+                    // not enough people joined then keep pushing it back till the day comes ㅠㅠ
+                    gameStartTimestamp == block.timestamp + interval;
+                }
             }
         }
     }

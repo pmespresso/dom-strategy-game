@@ -32,7 +32,9 @@ contract DomStrategyGameTest is Test {
 
     HelperConfig helper = new HelperConfig();
     MockVRFCoordinatorV2 vrfCoordinator;
-    uint256 INTERVAL = 1 minutes;
+    uint256 public staticTime;
+    uint256 public INTERVAL = 20 seconds;
+    uint256 public intendedStartTime = block.timestamp + 30 seconds;
 
     function setUp() public {
         (
@@ -59,13 +61,12 @@ contract DomStrategyGameTest is Test {
         arthur_pk = vm.deriveKey(mnemonic4, 0);
         arthur = vm.addr(arthur_pk);
 
+        // VRF
         vrfCoordinator = new MockVRFCoordinatorV2();
         uint64 subscriptionId = vrfCoordinator.createSubscription();
         uint96 FUND_AMOUNT = 1000 ether;
-        vrfCoordinator.fundSubscription(subscriptionId, FUND_AMOUNT);
-
-        uint256 intendedStartTime = block.timestamp + INTERVAL;
-
+        vrfCoordinator.fundSubscription(subscriptionId, FUND_AMOUNT);   
+    
         basicCharacter = new BaseCharacter();
         game = new DomStrategyGame(address(vrfCoordinator), link, subscriptionId, keyHash, INTERVAL, intendedStartTime);
 
@@ -86,6 +87,11 @@ contract DomStrategyGameTest is Test {
         console.log("dhof: ", dhof);
         console.log("arthur: ", arthur);
         console.log("w1nt3r: ", w1nt3r);
+
+        // Keeper
+        intendedStartTime = block.timestamp + INTERVAL;
+        staticTime = block.timestamp;
+        vm.warp(staticTime);
     }
 
     function connect2() public {
@@ -670,5 +676,61 @@ contract DomStrategyGameTest is Test {
         // verify everyones gets out
 
         // next round if >=2 people stay on the jail cell they battle as normal
+    }
+
+        function testCheckupReturnsFalseBeforeTime() public {
+        (bool upkeepNeeded, ) = game.checkUpkeep("0x");
+        assertTrue(!upkeepNeeded);
+    }
+
+    function testCheckupReturnsTrueAfterTime() public {
+        vm.warp(staticTime + INTERVAL + 1); // Needs to be more than the interval
+        (bool upkeepNeeded, ) = game.checkUpkeep("0x");
+        assertTrue(upkeepNeeded);
+    }
+
+    // function testPerformUpkeepCallsResolve() public {
+    //     vm.warp(staticTime + INTERVAL + 1);
+    //     game.performUpkeep("0x");
+
+    //     vm.warp(staticTime + INTERVAL + 1);
+    //     game.performUpkeep("0x");
+        
+    // }
+
+    function testPerformUpkeepUpdatesTimeAndStartsGame() public {
+        // Expect to start at 31
+        uint256 gameStartTime = game.gameStartTimestamp();
+
+        // Fastforward to 22
+        // Assert Time Updates
+        vm.warp(staticTime + INTERVAL + 1);
+        game.performUpkeep("0x");
+
+        assertTrue(game.lastTimestamp() == block.timestamp);
+        assertTrue(block.timestamp + 9 seconds == gameStartTime);
+
+        // Assert Game is Started
+        vm.warp(block.timestamp + 10 seconds + INTERVAL);
+        game.performUpkeep("0x");
+
+        // Nobody joined yet, so game should get delayed by another INTERVAL
+        assert(game.gameStarted() == false);
+
+        connect2();
+        vm.warp(block.timestamp + INTERVAL + 1 seconds);
+        game.performUpkeep("0x");
+
+        // Assert Game is Started
+        assert(game.gameStarted() == true);
+        (uint jailX, uint jailY) = game.jailCell();
+        assert(jailX != 0 && jailY != 0);
+        assert(game.currentTurn() == 1);
+    }
+
+    function testFuzzingExample(bytes memory variant) public {
+        // We expect this to fail, no matter how different the input is!
+        vm.expectRevert(bytes("Time interval not met."));
+        game.performUpkeep(variant);
     }
 }

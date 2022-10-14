@@ -25,8 +25,11 @@ contract DeployGame is Script {
         ) = helperConfig.activeNetworkConfig();
         
         vm.startBroadcast();
-
-        DomStrategyGame game = new DomStrategyGame(vrfCoordinator, link, subscriptionId, keyHash, 10 minutes, block.timestamp + 10 minutes);
+        
+        // test params
+        // call resolve every 10 minutes
+        // start game 5 minutes after deploy
+        new DomStrategyGame(vrfCoordinator, link, subscriptionId, keyHash, 10 minutes, block.timestamp + 5 minutes);
 
         BaseCharacter character = new BaseCharacter();
 
