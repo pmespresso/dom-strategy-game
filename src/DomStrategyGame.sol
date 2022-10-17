@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.17;
 
-import "forge-std/console.sol";
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 import "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721Receiver.sol";
@@ -144,6 +143,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     event Jail(address indexed who, uint256 indexed inmatesCount);
     event AttemptJailBreak(address indexed who, uint256 x, uint256 y);
     event JailBreak(address indexed who, uint256 newInmatesCount);
+    event GameStartDelayed(uint256 indexed newStartTimeStamp);
 
     constructor(
         address _vrfCoordinator,
@@ -832,6 +832,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                 } else {
                     // not enough people joined then keep pushing it back till the day comes ㅠㅠ
                     gameStartTimestamp == block.timestamp + interval;
+                    emit GameStartDelayed(gameStartTimestamp);
                 }
             }
         }
