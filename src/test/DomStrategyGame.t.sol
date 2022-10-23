@@ -33,8 +33,8 @@ contract DomStrategyGameTest is Test {
     HelperConfig helper = new HelperConfig();
     MockVRFCoordinatorV2 vrfCoordinator;
     uint256 public staticTime;
-    uint256 public INTERVAL = 20 seconds;
-    uint256 public intendedStartTime = block.timestamp + 30 seconds;
+    uint256 public INTERVAL = 10 seconds;
+    uint256 public intendedStartTime = 5 seconds;
 
     function setUp() public {
         (
@@ -72,11 +72,11 @@ contract DomStrategyGameTest is Test {
 
         vrfCoordinator.addConsumer(subscriptionId, address(game));
 
-        game.init();
-        vrfCoordinator.fulfillRandomWords(
-            game.vrf_requestId(),
-            address(game)
-        );
+        // game.init();
+        // vrfCoordinator.fulfillRandomWords(
+        //     game.vrf_requestId(),
+        //     address(game)
+        // );
 
         vm.deal(w1nt3r, 1 ether);
         vm.deal(dhof, 6.9 ether);
@@ -132,13 +132,15 @@ contract DomStrategyGameTest is Test {
         game.reveal(turn, nonce2, call2);
         
         // N.B. roll dice, resolve should be done by Chainlink Keeprs
-        game.rollDice(turn);
-        vrfCoordinator.fulfillRandomWords(
-            game.vrf_requestId(),
-            address(game)
-        );
+        // game.requestRandomWords();
+        vm.warp(block.timestamp + INTERVAL + 1);
+        game.performUpkeep("0x");
+
+        // vrfCoordinator.fulfillRandomWords(
+        //     game.vrf_requestId(),
+        //     address(game)
+        // );
         
-        game.resolve(turn);
         vm.stopPrank();
     }
 
@@ -155,14 +157,14 @@ contract DomStrategyGameTest is Test {
         vm.prank(w1nt3r);
         game.reveal(turn, nonce4, call4);
 
-        // TODO: roll dice, resolve should be done by Chainlink Keeprs
-        game.rollDice(turn);
-        vrfCoordinator.fulfillRandomWords(
-            game.vrf_requestId(),
-            address(game)
-        );
+        vm.warp(block.timestamp + INTERVAL + 1);
+        game.performUpkeep("0x");
+
+        // vrfCoordinator.fulfillRandomWords(
+        //     game.vrf_requestId(),
+        //     address(game)
+        // );
         
-        game.resolve(turn);
         vm.stopPrank();
     }
 
@@ -244,16 +246,15 @@ contract DomStrategyGameTest is Test {
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, call2)));
 
         vm.warp(block.timestamp +  INTERVAL + (INTERVAL/4));
+        game.performUpkeep("0x");
 
         // Dhof doesn't reveal....
-
-        game.rollDice(turn);
-        vrfCoordinator.fulfillRandomWords(
-            game.vrf_requestId(),
-            address(game)
-        );
+        // game.requestRandomWords();
+        // vrfCoordinator.fulfillRandomWords(
+        //     game.vrf_requestId(),
+        //     address(game)
+        // );
         
-        game.resolve(turn);
         address inmate0 = game.inmates(0);
         address inmate1 = game.inmates(1);
         (uint256  jailX, uint256 jailY) = game.jailCell();
@@ -678,7 +679,7 @@ contract DomStrategyGameTest is Test {
         // next round if >=2 people stay on the jail cell they battle as normal
     }
 
-        function testCheckupReturnsFalseBeforeTime() public {
+    function testCheckupReturnsFalseBeforeTime() public {
         (bool upkeepNeeded, ) = game.checkUpkeep("0x");
         assertTrue(!upkeepNeeded);
     }
@@ -699,33 +700,51 @@ contract DomStrategyGameTest is Test {
     // }
 
     function testPerformUpkeepUpdatesTimeAndStartsGame() public {
-        // Expect to start at 31
-        uint256 gameStartTime = game.gameStartTimestamp();
-
-        // Fastforward to 22
+        // Fastforward to 10
         // Assert Time Updates
-        vm.warp(staticTime + INTERVAL + 1);
+        vm.warp(staticTime + INTERVAL - 1);
         game.performUpkeep("0x");
+        vrfCoordinator.fulfillRandomWords(
+            game.vrf_requestId(),
+            address(game)
+        );
+        console.log("block.timestamp ", block.timestamp);
+        console.log("randomness ", game.randomness());
 
-        assertTrue(game.lastTimestamp() == block.timestamp);
-        assertTrue(block.timestamp + 9 seconds == gameStartTime);
+        require(game.randomness() != 0, "Randomness should be set after first upkeep");
+        assertTrue(game.lastUpkeepTimestamp() == block.timestamp);
 
         // Assert Game is Started
-        vm.warp(block.timestamp + 10 seconds + INTERVAL);
+        vm.warp(game.gameStartTimestamp());
         game.performUpkeep("0x");
+        console.log("block.timestamp ", block.timestamp);
 
         // Nobody joined yet, so game should get delayed by another INTERVAL
         assert(game.gameStarted() == false);
 
         connect2();
-        vm.warp(block.timestamp + INTERVAL + 1 seconds);
+        vm.warp(game.gameStartTimestamp() + INTERVAL + 1 seconds);
         game.performUpkeep("0x");
+        console.log("block.timestamp ", block.timestamp);
 
         // Assert Game is Started
         assert(game.gameStarted() == true);
+        assert(game.gameStage() == GameStage.Submit);
         (uint jailX, uint jailY) = game.jailCell();
         assert(jailX != 0 && jailY != 0);
         assert(game.currentTurn() == 1);
+
+        vm.warp(block.timestamp + INTERVAL + 1 seconds);
+        game.performUpkeep("0x");
+        console.log("block.timestamp ", block.timestamp);
+        assert(game.gameStage() == GameStage.Reveal);
+
+        vm.warp(block.timestamp + INTERVAL + 1 seconds);
+        // Assert Upkeep calls resolve from here on out
+        game.performUpkeep("0x");
+        console.log("block.timestamp ", block.timestamp);
+        assert(game.gameStage() == GameStage.Resolve);
+        assert(game.currentTurn() == 2);
     }
 
     // function testFuzzingExample(bytes memory variant) public {

@@ -40,6 +40,12 @@ struct JailCell {
     uint256 y;
 }
 
+enum GameStage {
+    Submit,
+    Reveal,
+    Resolve
+}
+
 contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBaseV2 {
     JailCell public jailCell;
     mapping(address => Player) public players;
@@ -57,9 +63,10 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
     // Keepers
     uint256 public interval;
-    uint256 public lastTimestamp;
+    uint256 public lastUpkeepTimestamp;
     uint256 public gameStartTimestamp;
     bool public gameStarted;
+    bool public isFirstUpkeep = true;
 
     // VRF
     VRFCoordinatorV2Interface immutable COORDINATOR;
@@ -90,6 +97,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     address public winnerPlayer;
     address[] public inmates = new address[](maxPlayers);
     address[] activePlayers;
+    
+    GameStage public gameStage;
 
     error LoserTriedWithdraw();
     error OnlyWinningAllianceMember();
@@ -118,6 +127,10 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         address indexed who,
         uint256 indexed turn
     );
+    event NoSubmit(
+        address indexed who,
+        uint256 indexed turn
+    );
     event AllianceCreated(
         address indexed admin,
         uint256 indexed allianceId,
@@ -131,7 +144,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         uint256 indexed allianceId,
         address indexed player
     );
-    
+    event FirstUpkeep();
+    event UpkeepCheck(uint256 indexed currentTimestamp, uint256 indexed lastUpkeepTimestamp, bool indexed upkeepNeeded);
     event BattleCommenced(address indexed player1, address indexed defender);
     event BattleFinished(address indexed winner, uint256 indexed spoils);
     event DamageDealt(address indexed by, address indexed to, uint256 indexed amount);
@@ -144,6 +158,9 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     event AttemptJailBreak(address indexed who, uint256 x, uint256 y);
     event JailBreak(address indexed who, uint256 newInmatesCount);
     event GameStartDelayed(uint256 indexed newStartTimeStamp);
+    event SkipInmateTurn(address indexed who, uint256 indexed turn);
+    event RolledDice(uint256 indexed turn, uint256 indexed vrf_request_id);
+    event NewGameStage(GameStage indexed newGameStage);
 
     constructor(
         address _vrfCoordinator,
@@ -164,15 +181,16 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
         // Keeper
         interval = updateInterval;
-        lastTimestamp = block.timestamp;
+        lastUpkeepTimestamp = block.timestamp;
         gameStartTimestamp = _gameStartTimestamp;
 
         emit Constructed(vrf_owner, vrf_subscriptionId, _gameStartTimestamp);
     }
 
-    function init() external {
-        requestRandomWords();
-    }
+    // function init() internal {
+    //     COORDINATOR.addConsumer(vrf_subscriptionId, address(this));
+    //     requestRandomWords();
+    // }
     
     // FIXME: dev only (use vm.load)
     function setPlayingField(uint x, uint y, address addr) public {
@@ -194,7 +212,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         Player memory player = Player({
             addr: msg.sender,
             nftAddress: byoNft,
-            balance: msg.value, // balance can be used to buy shit
+            balance: msg.value, // balance can be used to buy items/powerups in the marketplace
             tokenId: tokenId,
             lastMoveTimestamp: block.timestamp,
             allianceId: 0,
@@ -222,7 +240,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
     function start() public {
         require(currentTurn == 0, "Already started");
-        require(activePlayersCount > 1, "No players");
+        require(activePlayersCount > 1, "Not enough players");
         require(randomness != 0, "Need randomness for jail cell");
 
         currentTurn = 1;
@@ -231,8 +249,6 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
         jailCell = JailCell({ x: randomness / 1e75, y: randomness % 99});
 
-        // console.log("Jail Cell : ", jailCell.x, jailCell.y);
-
         emit TurnStarted(currentTurn, currentTurnStartTimestamp);
     }
 
@@ -240,7 +256,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         require(currentTurn > 0, "Not started");
         require(turn == currentTurn, "Stale tx");
         // submit stage is interval set by deployer
-        require(block.timestamp <= currentTurnStartTimestamp + interval);
+        require(block.timestamp <= currentTurnStartTimestamp + interval, "Submit stage has passed.");
 
         players[msg.sender].pendingMoveCommitment = commitment;
 
@@ -254,8 +270,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     ) external {
         require(turn == currentTurn, "Stale tx");
         // then another interval for the reveal stage
-        require(block.timestamp > currentTurnStartTimestamp + interval);
-        require(block.timestamp < currentTurnStartTimestamp + interval * 2);
+        require(block.timestamp > currentTurnStartTimestamp + interval, "Reveal Stage has not started yet");
+        require(block.timestamp < currentTurnStartTimestamp + interval * 2, "Reveal Stage has passed");
 
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
@@ -273,22 +289,13 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         emit Revealed(msg.sender, currentTurn, nonce, data);
     }
 
-    // N.B. roll dice should be done by Chainlink Keeprs
-    function rollDice(uint256 turn) public {
-        require(turn == currentTurn, "Stale tx");
-        require(block.timestamp > currentTurnStartTimestamp + interval);
-
-        requestRandomWords();
-    }
-
     // The turns are processed in random order. The contract offloads sorting the players
     // list off-chain to save gas
-    function resolve(uint256 turn) public {
-        require(turn == currentTurn, "Stale tx");
+    function resolve() internal {
         require(randomness != 0, "Roll the die first");
         require(block.timestamp > currentTurnStartTimestamp + interval);
 
-        if (turn % 5 == 0) {
+        if (currentTurn % 5 == 0) {
             fieldSize -= 2;
         }
 
@@ -301,11 +308,14 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
             // If you're in jail you no longer get to do shit. Just hope somebody breaks you out.
             if (player.inJail) {
+                emit SkipInmateTurn(player.addr, currentTurn);
                 continue;
             }
             
             // If player straight up didn't submit then confiscate their NFT and send to jail
             if (player.pendingMoveCommitment == bytes32(0)) {
+                emit NoSubmit(player.addr, currentTurn);
+
                 IERC721(player.nftAddress).safeTransferFrom(player.addr, address(this), player.tokenId);
 
                 emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
@@ -313,13 +323,12 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                 sendToJail(player.addr);
                 continue;
             } else if (player.pendingMoveCommitment != bytes32(0) && player.pendingMove.length == 0) { // If player submitted but forgot to reveal, move them to jail
-                emit NoReveal(player.addr, turn);
+                emit NoReveal(player.addr, currentTurn);
                 sendToJail(player.addr);
                 // if you are in jail but your alliance wins, you still get a cut of the spoils
                 continue;
             }
 
-            // FIXME; Would be nice for contract size to make move,rest,etc. internal but this fails for some reason if it's internal
             (bool success, bytes memory err) = address(this).call(player.pendingMove);
 
             if (!success) {
@@ -327,7 +336,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                 if (int(player.balance - 0.05 ether) >= 0) {
                     player.balance -= 0.05 ether;
                     spoils[player.addr] == player.balance;
-                    emit BadMovePenalty(turn, player.addr, err);
+                    emit BadMovePenalty(currentTurn, player.addr, err);
                 } else {
                     sendToJail(player.addr);
                 }
@@ -748,11 +757,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         emit ReturnedRandomness(randomWords);
     }
 
-    /**
-    * @notice Requests randomness
-    * Assumes the subscription is funded sufficiently; "Words" refers to unit of data in Computer Science
-    */
-    function requestRandomWords() public onlyOwner {
+    function requestRandomWords() public onlyOwnerAndSelf {
         // Will revert if subscription is not set and funded.
         vrf_requestId = COORDINATOR.requestRandomWords(
         vrf_keyHash,
@@ -761,10 +766,11 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         vrf_callbackGasLimit,
         vrf_numWords
         );
+        emit RolledDice(vrf_requestId, currentTurn + 1);
     }
 
-    modifier onlyOwner() {
-        require(msg.sender == vrf_owner);
+    modifier onlyOwnerAndSelf() {
+        require(msg.sender == vrf_owner || msg.sender == address(this));
         _;
     }
 
@@ -800,30 +806,44 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         _;
     }
 
-    function setSubscriptionId(uint64 subId) public onlyOwner {
+    function setSubscriptionId(uint64 subId) public onlyOwnerAndSelf {
         vrf_subscriptionId = subId;
     }
 
-    function setOwner(address owner) public onlyOwner {
+    function setOwner(address owner) public onlyOwnerAndSelf {
         vrf_owner = owner;
     }
 
-     function checkUpkeep(bytes memory) public view returns (bool upkeepNeeded, bytes memory performData) {
-        upkeepNeeded = (block.timestamp - lastTimestamp) >= interval;
-        performData = bytes("");
+     function checkUpkeep(bytes memory) public returns (bool, bytes memory) {
+        bool upkeepNeeded = (block.timestamp - lastUpkeepTimestamp) >= interval;
+        bytes memory performData = bytes("");
+        emit UpkeepCheck(block.timestamp, lastUpkeepTimestamp, upkeepNeeded);
 
         return (upkeepNeeded, performData);
     }
 
     function performUpkeep(bytes calldata) external {
-        lastTimestamp = block.timestamp;
+        if (isFirstUpkeep) {
+            requestRandomWords();
+            isFirstUpkeep = false;
+            emit FirstUpkeep();
+        }
         if (gameStarted) {
             (bool upkeepNeeded,) = checkUpkeep("");
             require(upkeepNeeded, "Time interval not met.");
-            
-            uint256 turn = currentTurn + 1;
-            rollDice(turn);
-            resolve(turn);
+
+            if (gameStage == GameStage.Submit) {
+                gameStage = GameStage.Reveal;
+                emit NewGameStage(GameStage.Reveal);
+                requestRandomWords();
+            } else if (gameStage == GameStage.Reveal) {
+                gameStage = GameStage.Resolve;
+                emit NewGameStage(GameStage.Resolve);
+                resolve();
+            } else if (gameStage == GameStage.Resolve) {
+                gameStage = GameStage.Submit;
+                emit NewGameStage(GameStage.Submit);
+            }
         } else {
             // check if max players or game start time reached
             if (activePlayersCount == maxPlayers || gameStartTimestamp <= block.timestamp) {
@@ -831,11 +851,12 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                     start();
                 } else {
                     // not enough people joined then keep pushing it back till the day comes ㅠㅠ
-                    gameStartTimestamp == block.timestamp + interval;
+                    gameStartTimestamp += interval;
                     emit GameStartDelayed(gameStartTimestamp);
                 }
             }
         }
+        lastUpkeepTimestamp = block.timestamp;
     }
 
     function onERC721Received(

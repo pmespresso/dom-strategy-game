@@ -30,4 +30,8 @@ contract BaseCharacter is ERC721 {
 
         return bytes(baseURI).length > 0 ? string(abi.encodePacked(baseURI, tokenId.toString())) : "";
     }
+
+    function setBaseURI(string memory _baseURI) external {
+        baseURI = _baseURI;
+    }
 }
