@@ -66,7 +66,6 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     uint256 public lastUpkeepTimestamp;
     uint256 public gameStartTimestamp;
     bool public gameStarted;
-    bool public isFirstUpkeep = true;
 
     // VRF
     VRFCoordinatorV2Interface immutable COORDINATOR;
@@ -144,7 +143,6 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         uint256 indexed allianceId,
         address indexed player
     );
-    event FirstUpkeep();
     event UpkeepCheck(uint256 indexed currentTimestamp, uint256 indexed lastUpkeepTimestamp, bool indexed upkeepNeeded);
     event BattleCommenced(address indexed player1, address indexed defender);
     event BattleFinished(address indexed winner, uint256 indexed spoils);
@@ -185,16 +183,6 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         gameStartTimestamp = _gameStartTimestamp;
 
         emit Constructed(vrf_owner, vrf_subscriptionId, _gameStartTimestamp);
-    }
-
-    // function init() internal {
-    //     COORDINATOR.addConsumer(vrf_subscriptionId, address(this));
-    //     requestRandomWords();
-    // }
-    
-    // FIXME: dev only (use vm.load)
-    function setPlayingField(uint x, uint y, address addr) public {
-        playingField[x][y] = addr;
     }
 
     function connect(uint256 tokenId, address byoNft) external payable {
@@ -246,6 +234,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         currentTurn = 1;
         currentTurnStartTimestamp = block.timestamp;
         gameStarted = true;
+        gameStage = GameStage.Submit;
+        emit NewGameStage(GameStage.Submit);
 
         jailCell = JailCell({ x: randomness / 1e75, y: randomness % 99});
 
@@ -256,7 +246,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         require(currentTurn > 0, "Not started");
         require(turn == currentTurn, "Stale tx");
         // submit stage is interval set by deployer
-        require(block.timestamp <= currentTurnStartTimestamp + interval, "Submit stage has passed.");
+        // require(block.timestamp <= currentTurnStartTimestamp + interval, "Submit stage has passed.");
+        require(gameStage == GameStage.Submit, "Only callable during the Submit Game Stage");
 
         players[msg.sender].pendingMoveCommitment = commitment;
 
@@ -270,8 +261,10 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     ) external {
         require(turn == currentTurn, "Stale tx");
         // then another interval for the reveal stage
-        require(block.timestamp > currentTurnStartTimestamp + interval, "Reveal Stage has not started yet");
-        require(block.timestamp < currentTurnStartTimestamp + interval * 2, "Reveal Stage has passed");
+        // require(block.timestamp > currentTurnStartTimestamp + interval, "Reveal Stage has not started yet");
+        // require(block.timestamp < currentTurnStartTimestamp + interval * 2, "Reveal Stage has passed");
+        require(gameStage == GameStage.Reveal, "Only callable during the Reveal Game Stage");
+
 
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
@@ -293,7 +286,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     // list off-chain to save gas
     function resolve() internal {
         require(randomness != 0, "Roll the die first");
-        require(block.timestamp > currentTurnStartTimestamp + interval);
+        require(gameStage == GameStage.Resolve, "Only callable during the Resolve Game Stage");
 
         if (currentTurn % 5 == 0) {
             fieldSize -= 2;
@@ -816,22 +809,17 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
      function checkUpkeep(bytes memory) public returns (bool, bytes memory) {
         bool upkeepNeeded = (block.timestamp - lastUpkeepTimestamp) >= interval;
-        bytes memory performData = bytes("");
         emit UpkeepCheck(block.timestamp, lastUpkeepTimestamp, upkeepNeeded);
+        bytes memory performData = bytes("");
 
         return (upkeepNeeded, performData);
     }
 
     function performUpkeep(bytes calldata) external {
-        if (isFirstUpkeep) {
-            requestRandomWords();
-            isFirstUpkeep = false;
-            emit FirstUpkeep();
-        }
-        if (gameStarted) {
-            (bool upkeepNeeded,) = checkUpkeep("");
-            require(upkeepNeeded, "Time interval not met.");
+        bool upkeepNeeded = (block.timestamp - lastUpkeepTimestamp) >= interval;
+        emit UpkeepCheck(block.timestamp, lastUpkeepTimestamp, upkeepNeeded);
 
+        if (gameStarted) {
             if (gameStage == GameStage.Submit) {
                 gameStage = GameStage.Reveal;
                 emit NewGameStage(GameStage.Reveal);

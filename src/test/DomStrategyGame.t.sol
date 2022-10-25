@@ -302,7 +302,7 @@ contract DomStrategyGameTest is Test {
             .depth(9)
             .checked_write(5);
 
-        game.setPlayingField(4, 5, piskomate);
+        // game.setPlayingField(4, 5, piskomate);
         
         vm.startPrank(piskomate);
         bytes memory piskomateMoveUp = abi.encodeWithSelector(DomStrategyGame.move.selector, piskomate, int8(-1));
@@ -324,7 +324,7 @@ contract DomStrategyGameTest is Test {
             .depth(9) // player.y
             .checked_write(4);
         
-        game.setPlayingField(4, 4, dhof);
+        // game.setPlayingField(4, 4, dhof);
 
         vm.startPrank(dhof);
         bytes memory dhofRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);

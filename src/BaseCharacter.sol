@@ -13,11 +13,15 @@ contract BaseCharacter is ERC721 {
     mapping (address => uint256[]) public tokensOwnedBy;
     
     error NonExistentTokenUri();
+
+    event Received(address indexed who, uint256 indexed amount);
+
     constructor() ERC721("Domination Character Base", "DOM") {
         currentTokenId = 1;
     }
 
-    function mint(address to) external {
+    function mint(address to) payable external {
+        require(msg.value >= 0.01 ether, "You need to pay at least 0.01 Ether to mint.");
         _mint(to, currentTokenId);
         currentTokenId += 1;
         tokensOwnedBy[to].push(currentTokenId);
@@ -33,5 +37,10 @@ contract BaseCharacter is ERC721 {
 
     function setBaseURI(string memory _baseURI) external {
         baseURI = _baseURI;
+    }
+
+    receive() external payable {
+        // React to receiving ether
+        emit Received(msg.sender, msg.value);
     }
 }
