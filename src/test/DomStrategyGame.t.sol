@@ -34,7 +34,7 @@ contract DomStrategyGameTest is Test {
     MockVRFCoordinatorV2 vrfCoordinator;
     uint256 public staticTime;
     uint256 public INTERVAL = 10 seconds;
-    uint256 public intendedStartTime = 5 seconds;
+    uint256 public intendedStartTime = 10 seconds;
 
     function setUp() public {
         (
@@ -78,10 +78,10 @@ contract DomStrategyGameTest is Test {
         //     address(game)
         // );
 
-        vm.deal(w1nt3r, 1 ether);
+        vm.deal(w1nt3r, 6.9 ether);
         vm.deal(dhof, 6.9 ether);
-        vm.deal(piskomate, 1 ether);
-        vm.deal(arthur, 1 ether);
+        vm.deal(piskomate, 6.9 ether);
+        vm.deal(arthur, 6.9 ether);
         
         console.log("piskomate: ", piskomate);
         console.log("dhof: ", dhof);
@@ -89,22 +89,21 @@ contract DomStrategyGameTest is Test {
         console.log("w1nt3r: ", w1nt3r);
 
         // Keeper
-        intendedStartTime = block.timestamp + INTERVAL;
         staticTime = block.timestamp;
         vm.warp(staticTime);
     }
 
     function connect2() public {
         vm.startPrank(piskomate);
-        basicCharacter.mint(piskomate);
+        basicCharacter.mint{value: 0.01 ether}(piskomate);
         basicCharacter.setApprovalForAll(address(game), true);
         game.connect{value: 1 ether}(1, address(basicCharacter));
         vm.stopPrank();
 
         vm.startPrank(dhof);
-        basicCharacter.mint(dhof);
+        basicCharacter.mint{value: 0.01 ether}(dhof);
         basicCharacter.setApprovalForAll(address(game), true);
-        game.connect{value: 6.9 ether}(2, address(basicCharacter));
+        game.connect{value: 1 ether}(2, address(basicCharacter));
         vm.stopPrank();
     }
 
@@ -112,13 +111,13 @@ contract DomStrategyGameTest is Test {
         connect2();
         
         vm.startPrank(arthur);
-        basicCharacter.mint(arthur);
+        basicCharacter.mint{value: 0.01 ether}(arthur);
         basicCharacter.setApprovalForAll(address(game), true);
         game.connect{value: 1 ether}(3, address(basicCharacter));
         vm.stopPrank();
         vm.startPrank(w1nt3r);
 
-        basicCharacter.mint(w1nt3r);
+        basicCharacter.mint{value: 0.01 ether}(w1nt3r);
         basicCharacter.setApprovalForAll(address(game), true);
         game.connect{value: 1 ether}(4, address(basicCharacter));
         vm.stopPrank();
@@ -700,51 +699,71 @@ contract DomStrategyGameTest is Test {
     // }
 
     function testPerformUpkeepUpdatesTimeAndStartsGame() public {
-        // Fastforward to 10
-        // Assert Time Updates
-        vm.warp(staticTime + INTERVAL - 1);
-        game.performUpkeep("0x");
+        game.requestRandomWords();
         vrfCoordinator.fulfillRandomWords(
             game.vrf_requestId(),
             address(game)
         );
-        console.log("block.timestamp ", block.timestamp);
-        console.log("randomness ", game.randomness());
 
-        require(game.randomness() != 0, "Randomness should be set after first upkeep");
-        assertTrue(game.lastUpkeepTimestamp() == block.timestamp);
-
-        // Assert Game is Started
-        vm.warp(game.gameStartTimestamp());
-        game.performUpkeep("0x");
-        console.log("block.timestamp ", block.timestamp);
-
-        // Nobody joined yet, so game should get delayed by another INTERVAL
-        assert(game.gameStarted() == false);
-
+        /** ===== Turn 0 ===== */
         connect2();
-        vm.warp(game.gameStartTimestamp() + INTERVAL + 1 seconds);
-        game.performUpkeep("0x");
+        vm.warp(game.gameStartTimestamp() + 2);
+        (bool upkeepNeeded, bytes memory performData) = game.checkUpkeep("0x");
+        assertTrue(upkeepNeeded);
+        
+        game.performUpkeep(performData);
         console.log("block.timestamp ", block.timestamp);
 
         // Assert Game is Started
         assert(game.gameStarted() == true);
         assert(game.gameStage() == GameStage.Submit);
+        assert(game.currentTurnStartTimestamp() == block.timestamp);
         (uint jailX, uint jailY) = game.jailCell();
         assert(jailX != 0 && jailY != 0);
         assert(game.currentTurn() == 1);
+        assert(game.lastUpkeepTimestamp() == block.timestamp);
+        
+        /** ===== Turn 1, Game Stage 0 (Submit) ===== */
+        vm.warp(game.gameStartTimestamp() + 1 seconds);
+        
+        bytes memory call1 = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
+        bytes memory call2 = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
+        uint256 turn = game.currentTurn();
+        bytes32 nonce1 = hex"01";
+        bytes32 nonce2 = hex"02";
+        
+        vm.startPrank(piskomate);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, call1)));
+        vm.stopPrank();
 
-        vm.warp(block.timestamp + INTERVAL + 1 seconds);
-        game.performUpkeep("0x");
+        vm.startPrank(w1nt3r);
+        game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, call2)));
+        vm.stopPrank();
+
+        game.performUpkeep(performData);
         console.log("block.timestamp ", block.timestamp);
         assert(game.gameStage() == GameStage.Reveal);
-
+        
+        /** ===== Turn 1, Game Stage 1 (Reveal) ===== */
         vm.warp(block.timestamp + INTERVAL + 1 seconds);
-        // Assert Upkeep calls resolve from here on out
-        game.performUpkeep("0x");
+
+        vm.startPrank(piskomate);
+        game.reveal(turn, nonce1, call1);
+        vm.stopPrank();
+
+        vm.startPrank(w1nt3r);
+        game.reveal(turn, nonce2, call2);
+        vm.stopPrank();
+
+        (upkeepNeeded, performData) = game.checkUpkeep("0x");
+        assertTrue(upkeepNeeded);
+        
+        // Assert Upkeep resolves from here on out
+        game.performUpkeep(performData);
         console.log("block.timestamp ", block.timestamp);
         assert(game.gameStage() == GameStage.Resolve);
         assert(game.currentTurn() == 2);
+
     }
 
     // function testFuzzingExample(bytes memory variant) public {

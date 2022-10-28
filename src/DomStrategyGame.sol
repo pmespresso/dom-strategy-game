@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.17;
 
+import 'forge-std/console.sol';
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 import "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721Receiver.sol";
@@ -102,6 +103,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     error LoserTriedWithdraw();
     error OnlyWinningAllianceMember();
 
+    event Fallback(uint256 indexed gasLeft);
     event ReturnedRandomness(uint256[] randomWords);
     event Constructed(address indexed owner, uint64 indexed subscriptionId, uint256 indexed _gameStartTimestamp);
     event Joined(address indexed addr);
@@ -189,13 +191,16 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         require(currentTurn == 0, "Already started");
         require(spoils[msg.sender] == 0, "Already joined");
         require(players[msg.sender].addr == address(0), "Already joined");
+        require(activePlayersCount < maxPlayers, "Already at max players");
         // Your share of the spoils if you win as part of an alliance are proportional to how much you paid to connect.
         require(msg.value > 0, "Send some eth");
 
-        // N.B. for now just verify ownership, later maybe put it up as collateral as the spoils, instead of the ETH balance.
-        // prove ownership of one of the NFTs in the allowList
+        // Verify Ownership
         uint256 nftBalance = IERC721(byoNft).balanceOf(msg.sender);
         require(nftBalance > 0, "You dont own this NFT you liar");
+
+        // Approve for confiscation if misbehave during game
+        IERC721(byoNft).setApprovalForAll(address(this), true);
 
         Player memory player = Player({
             addr: msg.sender,
@@ -285,6 +290,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     // The turns are processed in random order. The contract offloads sorting the players
     // list off-chain to save gas
     function resolve() internal {
+        // require(lowerBound < activePlayersCount, "Lower bound must be less than # of active players");
         require(randomness != 0, "Roll the die first");
         require(gameStage == GameStage.Resolve, "Only callable during the Resolve Game Stage");
 
@@ -293,8 +299,9 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         }
 
         // TODO: this will exceed block gas limit eventually, need to split `resolve` in a way that it can be called incrementally
+        // This will be done by registering multiple upkeeps and splitting by passing bounds in checkData of checkUpkeep
         // TODO: don't start at 0 every time, use vrf or some heuristic
-        for (uint256 i = 0; i < activePlayersCount; i++) {
+        for (uint256 i = 0; i < activePlayersCount; i++) { // activePlayersCount is 100 at max
             address addr = activePlayers[i];
 
             Player storage player = players[addr];
@@ -306,21 +313,21 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
             }
             
             // If player straight up didn't submit then confiscate their NFT and send to jail
-            if (player.pendingMoveCommitment == bytes32(0)) {
-                emit NoSubmit(player.addr, currentTurn);
+            // if (player.pendingMoveCommitment == bytes32(0)) {
+            //     emit NoSubmit(player.addr, currentTurn);
 
-                IERC721(player.nftAddress).safeTransferFrom(player.addr, address(this), player.tokenId);
+            //     IERC721(player.nftAddress).safeTransferFrom(player.addr, address(this), player.tokenId);
 
-                emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
+            //     emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
 
-                sendToJail(player.addr);
-                continue;
-            } else if (player.pendingMoveCommitment != bytes32(0) && player.pendingMove.length == 0) { // If player submitted but forgot to reveal, move them to jail
-                emit NoReveal(player.addr, currentTurn);
-                sendToJail(player.addr);
-                // if you are in jail but your alliance wins, you still get a cut of the spoils
-                continue;
-            }
+            //     sendToJail(player.addr);
+            //     continue;
+            // } else if (player.pendingMoveCommitment != bytes32(0) && player.pendingMove.length == 0) { // If player submitted but forgot to reveal, move them to jail
+            //     emit NoReveal(player.addr, currentTurn);
+            //     sendToJail(player.addr);
+            //     // if you are in jail but your alliance wins, you still get a cut of the spoils
+            //     continue;
+            // }
 
             (bool success, bytes memory err) = address(this).call(player.pendingMove);
 
@@ -332,6 +339,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                     emit BadMovePenalty(currentTurn, player.addr, err);
                 } else {
                     sendToJail(player.addr);
+                    continue;
                 }
             }
 
@@ -351,7 +359,6 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
             player.pendingMoveCommitment = bytes32(0);
         }
 
-        randomness = 0;
         currentTurn += 1;
         currentTurnStartTimestamp = block.timestamp;
 
@@ -724,7 +731,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     }
 
     // TODO: Make internal 
-    function sendToJail(address playerAddress) public {
+    function sendToJail(address playerAddress) internal {
         Player storage player = players[playerAddress];
 
         player.hp = 0;
@@ -750,7 +757,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         emit ReturnedRandomness(randomWords);
     }
 
-    function requestRandomWords() public onlyOwnerAndSelf {
+    function requestRandomWords() public {
+        
         // Will revert if subscription is not set and funded.
         vrf_requestId = COORDINATOR.requestRandomWords(
         vrf_keyHash,
@@ -807,27 +815,86 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         vrf_owner = owner;
     }
 
-     function checkUpkeep(bytes memory) public returns (bool, bytes memory) {
+      function checkUpkeep(bytes calldata) external view override returns (bool, bytes memory performData) {
+        performData = bytes("");
         bool upkeepNeeded = (block.timestamp - lastUpkeepTimestamp) >= interval;
-        emit UpkeepCheck(block.timestamp, lastUpkeepTimestamp, upkeepNeeded);
-        bytes memory performData = bytes("");
+
+        if (upkeepNeeded) {
+            address[] memory playersWithPendingMoves = new address[](activePlayersCount);
+            bytes[] memory primaryCalls = new bytes[](activePlayersCount);
+            bytes[] memory secondaryCalls = new bytes[](activePlayersCount);
+            bytes[] memory tertiaryCalls = new bytes[](activePlayersCount);
+
+            for (uint256 i = 0; i < activePlayersCount; i++) {
+                Player memory player = players[activePlayers[i]];
+
+                if (!player.inJail) {
+                    playersWithPendingMoves[i] = player.addr;
+                }
+                // If player straight up didn't submit then confiscate their NFT and send to jail
+                if (player.pendingMoveCommitment == bytes32(0)) {
+                    // emit NoSubmit(player.addr, currentTurn);
+
+                    secondaryCalls[i] = abi.encodeWithSelector(
+                        bytes4(keccak256(bytes("transferFrom(address,address,uint256)"))),
+                        player.addr, address(this), player.tokenId
+                    );
+
+                    tertiaryCalls[i] = abi.encodeWithSignature("sendToJail(address)", player.addr);
+                } else if (player.pendingMoveCommitment != bytes32(0) && player.pendingMove.length == 0) { // If player submitted but forgot to reveal, move them to jail
+                    tertiaryCalls[i] = abi.encodeWithSignature("sendToJail(address)", player.addr);
+
+                    // if you are in jail but your alliance wins, you still get a cut of the spoils
+                    continue;
+                }
+
+                primaryCalls[i] = player.pendingMove;
+            }
+
+            performData = abi.encode(playersWithPendingMoves, primaryCalls, secondaryCalls, tertiaryCalls);
+        }
 
         return (upkeepNeeded, performData);
     }
 
-    function performUpkeep(bytes calldata) external {
-        bool upkeepNeeded = (block.timestamp - lastUpkeepTimestamp) >= interval;
-        emit UpkeepCheck(block.timestamp, lastUpkeepTimestamp, upkeepNeeded);
-
+    function performUpkeep(bytes calldata performData) external override {
         if (gameStarted) {
             if (gameStage == GameStage.Submit) {
                 gameStage = GameStage.Reveal;
                 emit NewGameStage(GameStage.Reveal);
-                requestRandomWords();
             } else if (gameStage == GameStage.Reveal) {
                 gameStage = GameStage.Resolve;
+                require(randomness != 0, "Roll the die first");
+                require(gameStage == GameStage.Resolve, "Only callable during the Resolve Game Stage");
+
+                (address[] memory playersWithPendingMoves, bytes[] memory primaryCalls, bytes[] memory secondaryCalls,bytes[] memory tertiaryCalls) = abi.decode(performData, (address[], bytes[],  bytes[], bytes[]));
+
+                for (uint256 i = 0; i < playersWithPendingMoves.length; i++) {
+                    Player memory player = players[activePlayers[i]];
+                    (bool success, bytes memory err) = address(this).call(primaryCalls[i]);
+
+                    if (!success) {
+                        // Player submitted a bad move
+                        if (int(player.balance - 0.05 ether) >= 0) {
+                            player.balance -= 0.05 ether;
+                            spoils[player.addr] == player.balance;
+                            emit BadMovePenalty(currentTurn, player.addr, err);
+                        } else {
+                            sendToJail(player.addr);
+                        }
+                    }
+
+                    address(player.nftAddress).call(secondaryCalls[i]);
+                    address(this).call(tertiaryCalls[i]);
+                    
+                    players[playersWithPendingMoves[i]].pendingMove = "";
+                    players[playersWithPendingMoves[i]].pendingMoveCommitment = bytes32(0);
+                }
+                
+                currentTurn += 1;
+                currentTurnStartTimestamp = block.timestamp;
+                emit TurnStarted(currentTurn, currentTurnStartTimestamp);
                 emit NewGameStage(GameStage.Resolve);
-                resolve();
             } else if (gameStage == GameStage.Resolve) {
                 gameStage = GameStage.Submit;
                 emit NewGameStage(GameStage.Submit);
@@ -845,6 +912,18 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
             }
         }
         lastUpkeepTimestamp = block.timestamp;
+    }
+
+    // Fallback function must be declared as external.
+    fallback() external payable {
+        // send / transfer (forwards 2300 gas to this fallback function)
+        // call (forwards all of the gas)
+        emit Fallback(msg.value, gasleft());
+    }
+
+    receive() external payable {
+        // custom function code
+        emit Received(msg.value, gasleft());
     }
 
     function onERC721Received(
