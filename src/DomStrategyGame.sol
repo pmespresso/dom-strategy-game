@@ -10,7 +10,6 @@ import "chainlink/v0.8/interfaces/LinkTokenInterface.sol";
 import "chainlink/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "chainlink/v0.8/VRFConsumerBaseV2.sol";
 
-// TODO: Pack this struct once we know all the fields
 struct Player {
     address addr;
     address nftAddress;
@@ -102,8 +101,9 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
     error LoserTriedWithdraw();
     error OnlyWinningAllianceMember();
-
-    event Fallback(uint256 indexed gasLeft);
+    
+    event Fallback(uint256 indexed value, uint256 indexed gasLeft);
+    event Received(uint256 indexed value, uint256 indexed gasLeft);
     event ReturnedRandomness(uint256[] randomWords);
     event Constructed(address indexed owner, uint64 indexed subscriptionId, uint256 indexed _gameStartTimestamp);
     event Joined(address indexed addr);
@@ -730,8 +730,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         emit JailBreak(player.addr, inmatesCount);
     }
 
-    // TODO: Make internal 
-    function sendToJail(address playerAddress) internal {
+    function sendToJail(address playerAddress) public {
         Player storage player = players[playerAddress];
 
         player.hp = 0;

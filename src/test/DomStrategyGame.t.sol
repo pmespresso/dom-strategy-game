@@ -633,7 +633,6 @@ contract DomStrategyGameTest is Test {
         game.sendToJail(dhof);
         game.sendToJail(piskomate);
         
-        
         stdstore
             .target(address(game))
             .sig("players(address)")
@@ -707,7 +706,7 @@ contract DomStrategyGameTest is Test {
 
         /** ===== Turn 0 ===== */
         connect2();
-        vm.warp(game.gameStartTimestamp() + 2);
+        vm.warp(game.gameStartTimestamp() + 2 seconds);
         (bool upkeepNeeded, bytes memory performData) = game.checkUpkeep("0x");
         assertTrue(upkeepNeeded);
         
