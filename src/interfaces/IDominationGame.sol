@@ -29,6 +29,7 @@ struct Player {
 struct Alliance {
     address admin;
     uint256 id;
+    uint256 activeMembersCount; // if in Jail, not active
     uint256 membersCount;
     uint256 maxMembers;
     uint256 totalBalance; // used for calc cut of spoils in win condition
@@ -52,20 +53,22 @@ interface IDominationGame {
     event BattleCommenced(address indexed player1, address indexed defender);
     event BattleFinished(address indexed winner, uint256 indexed spoils);
     event BattleStalemate(uint256 indexed attackerHp, uint256 indexed defenderHp);
+    event CheckingWinCondition(uint256 indexed activeAlliancesCount, uint256 indexed  activePlayersCount);
     event Constructed(address indexed owner, uint64 indexed subscriptionId, uint256 indexed _gameStartTimestamp);
     event DamageDealt(address indexed by, address indexed to, uint256 indexed amount);
     event GameStartDelayed(uint256 indexed newStartTimeStamp);
-    event GameFinished(uint256 indexed turn, uint256 indexed totalSpoils);
+    event GameFinished(uint256 indexed turn, uint256 indexed winningTeamTotalSpoils);
     event Fallback(uint256 indexed value, uint256 indexed gasLeft);
     event Jail(address indexed who, uint256 indexed inmatesCount);
     event JailBreak(address indexed who, uint256 newInmatesCount);
     event Joined(address indexed addr);
     event Move(address indexed who, uint newX, uint newY);
-    event NewGameStage(GameStage indexed newGameStage);
+    event NewGameStage(GameStage indexed newGameStage, uint256 indexed turn);
     event NftConfiscated(address indexed who, address indexed nftAddress, uint256 indexed tokenId);
     event NoReveal(address indexed who, uint256 indexed turn);
     event NoSubmit(address indexed who, uint256 indexed turn);
     event Received(uint256 indexed value, uint256 indexed gasLeft);
+    event Rest(address indexed who, uint256 indexed x, uint256 indexed y);
     event ReturnedRandomness(uint256[] randomWords);
     event Revealed(address indexed addr, uint256 indexed turn, bytes32 nonce, bytes data);
     event RolledDice(uint256 indexed turn, uint256 indexed vrf_request_id);

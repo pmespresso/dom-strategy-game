@@ -44,8 +44,9 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     VRFCoordinatorV2Interface immutable COORDINATOR;
     LinkTokenInterface immutable LINKTOKEN;
     address internal vrf_owner;
-    uint256 internal randomness;
-    uint256 internal vrf_requestId;
+    // FIXME: change to 0
+    uint256 internal randomness = 78541660797044910968829902406342334108369226379826116161446442989268089806461;
+    uint256 public vrf_requestId;
     bytes32 immutable vrf_keyHash;
     uint16 immutable vrf_requestConfirmations = 3;
     uint32 immutable vrf_callbackGasLimit = 2_500_000;
@@ -114,6 +115,10 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     }
 
     constructor(
+        address vrfCoordinator,
+        address linkToken,
+        bytes32 keyHash,
+        uint64 subscriptionId,
         uint256 updateInterval) VRFConsumerBaseV2(0x7a1BaC17Ccc5b313516C5E16fb24f7659aA5ebed) 
     payable {
         // FIXME with governance
@@ -121,11 +126,11 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         fieldSize = maxPlayers; // also the max players
 
         // VRF
-        COORDINATOR = VRFCoordinatorV2Interface(0x7a1BaC17Ccc5b313516C5E16fb24f7659aA5ebed);
-        LINKTOKEN = LinkTokenInterface(0x326C977E6efc84E512bB9C30f76E30c160eD06FB);
-        vrf_keyHash = 0x4b09e658ed251bcafeebbc69400383d49f344ace09b9576fe248bb02c003fe9f;
+        COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
+        LINKTOKEN = LinkTokenInterface(linkToken);
+        vrf_keyHash = keyHash;
         vrf_owner = msg.sender;
-        vrf_subscriptionId = 1374;
+        vrf_subscriptionId = subscriptionId;
 
         // Keeper
         interval = updateInterval;
@@ -137,7 +142,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
     function connect(uint256 tokenId, address byoNft) external payable {
         require(currentTurn == 0, "Already started");
-        require(spoils.get(msg.sender) == 0, "Already joined");
+        (bool isSpoils,) = spoils.tryGet(msg.sender);
+        require(!isSpoils, "Already joined");
         require(players[msg.sender].addr == address(0), "Already joined");
         require(activePlayersCount < maxPlayers, "Already at max players");
         // Your share of the spoils if you win as part of an alliance are proportional to how much you paid to connect.
@@ -170,8 +176,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         spoils.set(msg.sender, msg.value);
         players[msg.sender] = player;
         activePlayers.set(activePlayersCount + 1, msg.sender);
-        // every independent player initially gets counted as an alliance, when they join or leave  or die, retally
-        activeAlliancesCount += 1;
+
         activePlayersCount += 1;
         nextAvailableCol = (nextAvailableCol + 2) % fieldSize;
         nextAvailableRow = nextAvailableCol == 0 ? nextAvailableRow + 1 : nextAvailableRow;
@@ -188,7 +193,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         currentTurnStartTimestamp = block.timestamp;
         gameStarted = true;
         gameStage = GameStage.Submit;
-        emit NewGameStage(GameStage.Submit);
+        emit NewGameStage(GameStage.Submit, currentTurn);
 
         jailCell = JailCell({ x: randomness / 1e75, y: randomness % 99 });
 
@@ -280,6 +285,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
     function rest(address player) external onlyViaSubmitReveal {
         players[player].hp += 2;
+        emit Rest(players[player].addr, players[player].x, players[player].y);
     }
 
     function createAlliance(address player, uint256 maxMembers, string calldata name) external onlyViaSubmitReveal {
@@ -291,6 +297,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         Alliance memory newAlliance = Alliance({
             admin: player,
             id: nextAvailableAllianceId,
+            activeMembersCount: 1,
             membersCount: 1,
             maxMembers: maxMembers,
             totalBalance: players[player].balance,
@@ -303,6 +310,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         }
         alliances[nextAvailableAllianceId] = newAlliance;
         nextAvailableAllianceId += 1;
+        activeAlliancesCount += 1;
 
         emit AllianceCreated(player, nextAvailableAllianceId, name);
     }
@@ -330,15 +338,16 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         
         require(alliance.membersCount < alliance.maxMembers - 1, "Cannot exceed max members count.");
 
+        alliances[allianceId].activeMembersCount += 1;
         alliances[allianceId].membersCount += 1;
+        console.log("alliance total balance ", alliances[allianceId].totalBalance);
+        console.log("new alliance joiner balance ", players[player].balance);
         alliances[allianceId].totalBalance += players[player].balance;
         if (allianceMembers[allianceId].length > 0) {
             allianceMembers[allianceId].push(player);
         } else {
             allianceMembers[allianceId] = [player];
         }
-        
-        activeAlliancesCount -= 1;
 
         emit AllianceMemberJoined(players[player].allianceId, player);
     }
@@ -357,8 +366,12 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         }
 
         alliances[allianceId].membersCount -= 1;
+        alliances[allianceId].activeMembersCount -= 1;
         alliances[allianceId].totalBalance -= players[player].balance;
-        activeAlliancesCount += 1;
+
+        if (alliances[allianceId].membersCount <= 1) {
+            _destroyAlliance(allianceId);
+        }
 
         emit AllianceMemberLeft(allianceId, player);
     }
@@ -373,7 +386,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         require(sent, "Failed to withdraw spoils");
 
         gameStage = GameStage.Finished;
-        emit GameFinished(currentTurn, winningAllianceTotalBalance);
+        emit GameFinished(currentTurn, winningTeamSpoils);
     }
 
     function withdrawWinnerPlayer() onlyWinner external {
@@ -382,7 +395,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         spoils.set(winnerPlayer, 0);
         emit WinnerWithdrawSpoils(winnerPlayer, spoils.get(winnerPlayer));
         gameStage = GameStage.Finished;
-        emit GameFinished(currentTurn, spoils.get(winnerPlayer));
+        emit GameFinished(currentTurn, winningTeamSpoils);
     }
 
     /**** Internal Functions *****/
@@ -412,27 +425,31 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
         // Case: Loser was not in an Alliance
         if (loser.allianceId == 0) {
-            activePlayersCount -= 1;
-            activeAlliancesCount -= 1;
-
             _checkWinCondition();
-        } else { // Case: Loser was in an Alliance
+        } else { 
+            // Case: Loser was in an Alliance
+            
              // Also will need to leave the alliance cuz ded
             Alliance storage loserAlliance = alliances[loser.allianceId];
             loserAlliance.totalBalance -= spoils.get(loser.addr);
             loserAlliance.membersCount -= 1;
+            loserAlliance.activeMembersCount -= 1;
             loser.allianceId = 0;
 
-            if (loserAlliance.membersCount == 1) {
+            if (loserAlliance.membersCount <= 1) {
                 // if you're down to one member, ain't no alliance left
-                activeAlliancesCount -= 1;
-                activePlayersCount -= 1;
-                delete alliances[loser.allianceId];
-                allianceAdmins.set(loser.allianceId, address(0));
+                _destroyAlliance(loser.allianceId);
             }
 
             _checkWinCondition();
         }
+    }
+
+    function _destroyAlliance(uint256 allianceId) internal {
+    // if you're down to one member, ain't no alliance left
+        activeAlliancesCount -= 1;
+        delete alliances[allianceId];
+        allianceAdmins.set(allianceId, address(0));
     }
 
     // If one player remains, they get the spoils
@@ -442,7 +459,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         emit WinnerPlayer(who);
         gameStarted = false;
         gameStage = GameStage.PendingWithdrawals;
-        emit NewGameStage(GameStage.PendingWithdrawals);
+        emit NewGameStage(GameStage.PendingWithdrawals, currentTurn);
     }
     
     // If an alliance won
@@ -452,32 +469,35 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         _calcWinningAllianceSpoils();
         gameStarted = false;
         gameStage = GameStage.PendingWithdrawals;
-        emit NewGameStage(GameStage.PendingWithdrawals);
+        emit NewGameStage(GameStage.PendingWithdrawals, currentTurn);
     }
 
-    function _checkWinCondition() internal returns (bool didSomeoneWin, address who) {
+    function _checkWinCondition() internal {
+        emit CheckingWinCondition(activeAlliancesCount, activePlayersCount);
+
         if (activeAlliancesCount == 1) {
-            for (uint256 i = 0; i < activeAlliancesCount; i++) {
-                if (alliances[i].membersCount > 0) {
+            for (uint256 i = 1; i <= nextAvailableAllianceId; i++) {
+                console.log("Alliance active members count: ", alliances[i].activeMembersCount);
+                if (alliances[i].activeMembersCount == activePlayersCount) {
                     _declareWinner(alliances[i].id);
                     break;
                 }
             }
         } else {
+            address who;
             if (activePlayersCount == 1) {
-                didSomeoneWin = true;
-
-                for (uint256 i = 0; i < activePlayersCount; i++) {
+                for (uint256 i = 1; i < activePlayersCount; i++) {
                     if (activePlayers.get(i) != address(0)) {
                         who = activePlayers.get(i);
                         break;
                     }
                 }
             } else if (activePlayersCount == 0) {
-                didSomeoneWin = true;
                 who = address(this);
             }
-            _declareWinner(who);
+            if (who != address(0)) {
+                _declareWinner(who);
+            }
         }
     }
 
@@ -520,9 +540,15 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         player.x = jailCell.x;
         player.y = jailCell.y;
         player.inJail = false;
+        activePlayersCount += 1;
 
         delete inmates[inmateIndex];
         inmatesCount -= 1;
+
+        if (player.allianceId != 0) {
+            Alliance storage alliance = alliances[player.allianceId];
+            alliance.activeMembersCount += 1;
+        }
 
         emit JailBreak(player.addr, inmatesCount);
     }
@@ -538,6 +564,14 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         inmates[nextInmateId] = player.addr;
         nextInmateId += 1;
         inmatesCount += 1;
+
+        console.log("Jailed player alliance: ", player.allianceId);
+
+        if (player.allianceId != 0) {
+            Alliance storage alliance = alliances[player.allianceId];
+            alliance.activeMembersCount -= 1;
+            console.log("jailed alliance member => new active members count: ", alliance.activeMembersCount);
+        }
 
         emit Jail(player.addr, inmatesCount);
     }
@@ -638,7 +672,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
     function checkUpkeep(bytes calldata) external view override returns (bool, bytes memory performData) {
         performData = bytes("");
-        bool upkeepNeeded = (block.timestamp - lastUpkeepTimestamp) >= interval;
+        bool upkeepNeeded = (block.timestamp - lastUpkeepTimestamp) >= interval && gameStage != GameStage.Finished && gameStage != GameStage.PendingWithdrawals;
 
         if (upkeepNeeded) {
             address[] memory playersWithPendingMoves = new address[](activePlayersCount);
@@ -646,32 +680,32 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
             bytes[] memory confiscationCalls = new bytes[](activePlayersCount);
             bytes[] memory sendToJailCalls = new bytes[](activePlayersCount);
 
-            for (uint256 i = 0; i < activePlayersCount; i++) {
+            for (uint256 i = 1; i <= activePlayersCount; i++) {
                 Player memory player = players[activePlayers.get(i)];
 
                 if (!player.inJail) {
-                    playersWithPendingMoves[i] = player.addr;
+                    playersWithPendingMoves[i - 1] = player.addr;
                 }
                 // If player straight up didn't submit then confiscate their NFT and send to jail
                 if (player.pendingMoveCommitment == bytes32(0)) {
                     // emit NoSubmit(player.addr, currentTurn);
 
-                    confiscationCalls[i] = abi.encodeWithSelector(
+                    confiscationCalls[i - 1] = abi.encodeWithSelector(
                         bytes4(keccak256(bytes("safeTransferFrom(address,address,uint256,bytes)"))),
                         player.addr, address(this), player.tokenId, ""
                     );
 
-                    sendToJailCalls[i] = abi.encodeWithSignature("_sendToJail(address)", player.addr);
+                    sendToJailCalls[i - 1] = abi.encodeWithSignature("_sendToJail(address)", player.addr);
 
                     continue;
                 } else if (player.pendingMoveCommitment != bytes32(0) && player.pendingMove.length == 0) { // If player submitted but forgot to reveal, move them to jail
-                    sendToJailCalls[i] = abi.encodeWithSignature("_sendToJail(address)", player.addr);
+                    sendToJailCalls[i - 1] = abi.encodeWithSignature("_sendToJail(address)", player.addr);
 
                     // if you are in jail but your alliance wins, you still get a cut of the spoils
                     continue;
                 }
 
-                pendingMoveCalls[i] = player.pendingMove;
+                pendingMoveCalls[i - 1] = player.pendingMove;
             }
 
             performData = abi.encode(playersWithPendingMoves, pendingMoveCalls, confiscationCalls, sendToJailCalls);
@@ -682,25 +716,23 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
     function performUpkeep(bytes calldata performData) external override {
         if (gameStarted) {
+            _checkWinCondition();
             if (gameStage == GameStage.Submit) {
                 gameStage = GameStage.Reveal;
-                emit NewGameStage(GameStage.Reveal);
+                emit NewGameStage(GameStage.Reveal, currentTurn);
             } else if (gameStage == GameStage.Reveal) {
                 gameStage = GameStage.Resolve;
-                emit NewGameStage(GameStage.Resolve);
+                emit NewGameStage(GameStage.Resolve, currentTurn);
 
                 require(randomness != 0, "Roll the die first");
-                require(gameStage == GameStage.Resolve, "Only callable during the Resolve Game Stage");
-
-                _checkWinCondition();
 
                 (address[] memory playersWithPendingMoves, bytes[] memory pendingMoveCalls, bytes[] memory confiscationCalls,bytes[] memory sendToJailCalls) = abi.decode(performData, (address[], bytes[],  bytes[], bytes[]));
 
-                for (uint256 i = 0; i < playersWithPendingMoves.length; i++) {
+                for (uint256 i = 1; i <= playersWithPendingMoves.length; i++) {
                     Player memory player = players[activePlayers.get(i)];
 
-                    if (keccak256(pendingMoveCalls[i]) != keccak256(bytes(""))) {
-                        (bool success, bytes memory err) = address(this).call(pendingMoveCalls[i]);
+                    if (keccak256(pendingMoveCalls[i - 1]) != keccak256(bytes(""))) {
+                        (bool success, bytes memory err) = address(this).call(pendingMoveCalls[i - 1]);
 
                         if (!success) {
                             // Player submitted a bad move
@@ -717,21 +749,20 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                         }
                     }
                     
-                    if (keccak256(confiscationCalls[i]) != keccak256(bytes(""))) {
-                        (bool success, ) = address(player.nftAddress).call(confiscationCalls[i]);
+                    if (keccak256(confiscationCalls[i - 1]) != keccak256(bytes(""))) {
+                        (bool success, ) = address(player.nftAddress).call(confiscationCalls[i - 1]);
                         emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
                     }
                     
-                    if (keccak256(sendToJailCalls[i]) != keccak256(bytes(""))) {
-                        (bool success, ) = address(player.nftAddress).call(sendToJailCalls[i]);
+                    if (keccak256(sendToJailCalls[i - 1]) != keccak256(bytes(""))) {
+                        (bool success, ) = address(player.nftAddress).call(sendToJailCalls[i - 1]);
                         emit NoReveal(player.addr, currentTurn);
                     }
                     
-                    if (playersWithPendingMoves[i] != address(0)) {
-                        players[playersWithPendingMoves[i]].pendingMove = "";
-                        players[playersWithPendingMoves[i]].pendingMoveCommitment = bytes32(0);
-                    }
-                    
+                    if (playersWithPendingMoves[i - 1] != address(0)) {
+                        players[playersWithPendingMoves[i - 1]].pendingMove = "";
+                        players[playersWithPendingMoves[i - 1]].pendingMoveCommitment = bytes32(0);
+                    }   
                 }
                 
                 currentTurn += 1;
@@ -739,7 +770,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                 emit TurnStarted(currentTurn, currentTurnStartTimestamp);
             } else if (gameStage == GameStage.Resolve) {
                 gameStage = GameStage.Submit;
-                emit NewGameStage(GameStage.Submit);
+                emit NewGameStage(GameStage.Submit, currentTurn);
             }
         } else {
             // check if max players or game start time reached
