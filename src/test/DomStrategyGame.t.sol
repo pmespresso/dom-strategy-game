@@ -215,7 +215,7 @@ contract DomStrategyGameTest is Test {
         connect2();
 
         game.start();
-
+        /******* Game Stage 0: Submit ********/
         // bytes32 nonce1 = hex"01";
         bytes32 nonce2 = hex"02";
         uint256 turn = 1;
@@ -231,33 +231,34 @@ contract DomStrategyGameTest is Test {
             int8(2)
         );
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, call2)));
+        /******* Game Stage 1: Reveal ********/
+        vm.warp(block.timestamp +  INTERVAL + 1);
+        game.performUpkeep("");
 
-        vm.warp(block.timestamp +  INTERVAL + (INTERVAL/4));
-        game.performUpkeep("0x");
+        // Nobody Reveals
 
-        // Dhof doesn't reveal....
-        // game.requestRandomWords();
-        // vrfCoordinator.fulfillRandomWords(
-        //     game.vrf_requestId(),
-        //     address(game)
-        // );
+        /******* Game Stage 2: Resolve ********/
+        vm.warp(block.timestamp +  INTERVAL + 1);
+        (,bytes memory performData) = game.checkUpkeep("");
+        game.performUpkeep(performData);
         
         address inmate0 = game.inmates(0);
         address inmate1 = game.inmates(1);
-        // (uint256  jailX, uint256 jailY) = game.jailCell();
+        (uint256 jailX, uint256 jailY) = game.jailCell();
+        
         
         (,address pisko_nft,uint256 pisko_tokenId,,,,,, uint256 pisko_x, uint256 pisko_y,,,bool pisko_inJail) = game.players(piskomate);
 
         // Piskomate didn't submit at all so check confiscation
         require(inmate0 == piskomate || inmate1 == piskomate, "Piskomate should be sent to jail since he didn't submit or reveal");
-        // require(jailX == pisko_x && jailY == pisko_y && pisko_inJail == true, "Pisko position should be jail cell.");
+        require(jailX == pisko_x && jailY == pisko_y && pisko_inJail == true, "Pisko position should be jail cell.");
         require(IERC721(pisko_nft).balanceOf(piskomate) == 0, "Piskomate should no longer have his Loot");
         require(IERC721(pisko_nft).ownerOf(pisko_tokenId) == address(game), "The Game should now have Piskomate's Loot");
 
         (,address dhof_nft, uint256 dhof_tokenId,,,,uint256 dhof_hp,, uint256 x, uint256 y,,,bool inJail) = game.players(dhof);
         
         // Dhof submitted but didn't reveal so just check he's in jail
-        // require(jailX == x && jailY == y && inJail == true, "Dhof position should be jail cell.");
+        require(jailX == x && jailY == y && inJail == true, "Dhof position should be jail cell.");
         require(dhof_hp == 0, "Dhof hp should be 0 in jail.");
         require(inmate0 == dhof || inmate1 == dhof, "Dhof should be sent to jail since he didn't reveal");
         require(IERC721(dhof_nft).balanceOf(dhof) == 1 && IERC721(dhof_nft).ownerOf(dhof_tokenId) == dhof, "Dhof should still have his NFT.");

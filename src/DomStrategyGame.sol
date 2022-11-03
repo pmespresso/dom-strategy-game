@@ -18,7 +18,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     using EnumerableMap for EnumerableMap.AddressToUintMap;
     // TODO: get rid of this in favor of governance
     address public admin;
-    JailCell private jailCell;
+    JailCell public jailCell;
     mapping(address => Player) public players;
     mapping(uint256 => mapping(uint256 => address)) public playingField;
     mapping(uint256 => Alliance) public alliances;
@@ -71,6 +71,11 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     address[] public inmates = new address[](maxPlayers);
     
     GameStage public gameStage;
+
+    modifier onlyGame() {
+        require(msg.sender == address(this), "Only callable by game contract");
+        _;
+    }
 
     modifier onlyOwnerAndSelf() {
         require(msg.sender == vrf_owner || msg.sender == address(this));
@@ -553,7 +558,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         emit JailBreak(player.addr, inmatesCount);
     }
 
-    function _sendToJail(address playerAddress) internal {
+    // N.B. only external/public functions have a .selector so change visibiltiy or call it another way.
+    function _sendToJail(address playerAddress) public onlyGame {
         Player storage player = players[playerAddress];
 
         player.hp = 0;
@@ -689,17 +695,23 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                 // If player straight up didn't submit then confiscate their NFT and send to jail
                 if (player.pendingMoveCommitment == bytes32(0)) {
                     // emit NoSubmit(player.addr, currentTurn);
-
+                    
                     confiscationCalls[i - 1] = abi.encodeWithSelector(
-                        bytes4(keccak256(bytes("safeTransferFrom(address,address,uint256,bytes)"))),
-                        player.addr, address(this), player.tokenId, ""
-                    );
+                        bytes4(
+                            keccak256(
+                                bytes("safeTransferFrom(address,address,uint256,bytes)"))), player.addr, address(this), player.tokenId, "");
 
-                    sendToJailCalls[i - 1] = abi.encodeWithSignature("_sendToJail(address)", player.addr);
+                    sendToJailCalls[i - 1] = abi.encodeWithSelector(
+                        bytes4(
+                            keccak256(
+                                bytes("_sendToJail(address)"))), player.addr);
 
                     continue;
                 } else if (player.pendingMoveCommitment != bytes32(0) && player.pendingMove.length == 0) { // If player submitted but forgot to reveal, move them to jail
-                    sendToJailCalls[i - 1] = abi.encodeWithSignature("_sendToJail(address)", player.addr);
+                    sendToJailCalls[i - 1] = abi.encodeWithSelector(
+                                bytes4(
+                                    keccak256(
+                                        bytes("_sendToJail(address)"))), player.addr);
 
                     // if you are in jail but your alliance wins, you still get a cut of the spoils
                     continue;
@@ -751,12 +763,20 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                     
                     if (keccak256(confiscationCalls[i - 1]) != keccak256(bytes(""))) {
                         (bool success, ) = address(player.nftAddress).call(confiscationCalls[i - 1]);
-                        emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
+
+                        if (success) {
+                            emit NoSubmit(player.addr, currentTurn);
+                            emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
+                        }    
                     }
-                    
+                    console.log("-------sendToJailCalls[i - 1]-----");
+                    console.logBytes(sendToJailCalls[i - 1]);
                     if (keccak256(sendToJailCalls[i - 1]) != keccak256(bytes(""))) {
-                        (bool success, ) = address(player.nftAddress).call(sendToJailCalls[i - 1]);
-                        emit NoReveal(player.addr, currentTurn);
+                        (bool success, ) = address(this).call(sendToJailCalls[i - 1]);
+
+                        if (success) {
+                            emit NoReveal(player.addr, currentTurn);
+                        }
                     }
                     
                     if (playersWithPendingMoves[i - 1] != address(0)) {
