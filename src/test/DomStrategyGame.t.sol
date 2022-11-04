@@ -6,14 +6,14 @@ import "forge-std/StdJson.sol";
 
 import "./mocks/MockVRFCoordinatorV2.sol";
 import "../../script/HelperConfig.sol";
-import "../DomStrategyGame.sol";
+import "../DominationGame.sol";
 import "../interfaces/IDominationGame.sol";
 import "../BaseCharacter.sol";
 
-contract DomStrategyGameTest is Test {
+contract DominationGameTest is Test {
     using stdStorage for StdStorage;
 
-    DomStrategyGame public game;
+    DominationGame public game;
     BaseCharacter public basicCharacter;
 
     uint256 JOINING_SPOILS = 1 ether;
@@ -47,6 +47,8 @@ contract DomStrategyGameTest is Test {
             ,
             ,
             address link,
+            ,
+            ,
             ,
             ,
             ,
@@ -87,8 +89,8 @@ contract DomStrategyGameTest is Test {
         vrfCoordinator.fundSubscription(subscriptionId, FUND_AMOUNT);   
     
         basicCharacter = new BaseCharacter();
-        // game = new DomStrategyGame(address(vrfCoordinator), link, subscriptionId, keyHash, INTERVAL, intendedStartTime);
-        game = new DomStrategyGame(address(vrfCoordinator), link, keyHash, subscriptionId, INTERVAL);
+        // game = new DominationGame(address(vrfCoordinator), link, subscriptionId, keyHash, INTERVAL, intendedStartTime);
+        game = new DominationGame(address(vrfCoordinator), link, keyHash, subscriptionId, INTERVAL);
 
         vrfCoordinator.addConsumer(subscriptionId, address(game));
         console.log("piskomate: ", piskomate);
@@ -181,13 +183,13 @@ contract DomStrategyGameTest is Test {
 
         // To make a move, you submit a hash of the intended move with the current turn, a nonce, and a call to either move or rest. Everyone's move is collected and then revealed at once after INTERVAL
         vm.prank(piskomate);
-        bytes memory call1 = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
+        bytes memory call1 = abi.encodeWithSelector(DominationGame.rest.selector, piskomate);
 
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, call1)));
         
         vm.prank(dhof);
         bytes memory call2 = abi.encodeWithSelector(
-            DomStrategyGame.move.selector,
+            DominationGame.move.selector,
             dhof,
             int8(2)
         );
@@ -226,7 +228,7 @@ contract DomStrategyGameTest is Test {
         // Let's say dhof submits then doesn't reveal        
         vm.prank(dhof);
         bytes memory call2 = abi.encodeWithSelector(
-            DomStrategyGame.move.selector,
+            DominationGame.move.selector,
             dhof,
             int8(2)
         );
@@ -293,7 +295,7 @@ contract DomStrategyGameTest is Test {
         // game.setPlayingField(4, 5, piskomate);
         
         vm.startPrank(piskomate);
-        bytes memory piskomateMoveUp = abi.encodeWithSelector(DomStrategyGame.move.selector, piskomate, int8(-1));
+        bytes memory piskomateMoveUp = abi.encodeWithSelector(DominationGame.move.selector, piskomate, int8(-1));
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, piskomateMoveUp)));
         vm.stopPrank();
 
@@ -315,7 +317,7 @@ contract DomStrategyGameTest is Test {
         // game.setPlayingField(4, 4, dhof);
 
         vm.startPrank(dhof);
-        bytes memory dhofRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+        bytes memory dhofRest = abi.encodeWithSelector(DominationGame.rest.selector, dhof);
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, dhofRest)));
         vm.stopPrank();
 
@@ -357,12 +359,12 @@ contract DomStrategyGameTest is Test {
 
         // piskomate didn't manage to kill dhof last round, he moves again to where he thinks dhof again to finish the job.
         vm.startPrank(piskomate);
-        bytes memory piskomateMoveUpAgain = abi.encodeWithSelector(DomStrategyGame.move.selector, piskomate, int8(-1));
+        bytes memory piskomateMoveUpAgain = abi.encodeWithSelector(DominationGame.move.selector, piskomate, int8(-1));
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, piskomateMoveUpAgain)));
         vm.stopPrank();
 
         vm.startPrank(dhof);
-        bytes memory dhofRestAgain = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+        bytes memory dhofRestAgain = abi.encodeWithSelector(DominationGame.rest.selector, dhof);
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, dhofRest)));
         vm.stopPrank();
 
@@ -404,7 +406,7 @@ contract DomStrategyGameTest is Test {
         vm.startPrank(piskomate);
         // vm.expectRevert(
         //     abi.encodeWithSelector(
-        //         DomStrategyGame.LoserTriedWithdraw.selector
+        //         DominationGame.LoserTriedWithdraw.selector
         //     )
         // );
         game.withdrawWinnerPlayer();
@@ -439,23 +441,23 @@ contract DomStrategyGameTest is Test {
          */
         /******* Game Stage 0: Submit ********/
         vm.startPrank(piskomate);
-        bytes memory piskomateRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
+        bytes memory piskomateRest = abi.encodeWithSelector(DominationGame.rest.selector, piskomate);
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, piskomateRest)));
         vm.stopPrank();
 
         vm.startPrank(dhof);
-        bytes memory dhofRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+        bytes memory dhofRest = abi.encodeWithSelector(DominationGame.rest.selector, dhof);
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, dhofRest)));
         vm.stopPrank();
 
         // create alliance
         vm.startPrank(arthur);
-        bytes memory arthurCreateAlliance = abi.encodeWithSelector(DomStrategyGame.createAlliance.selector, arthur, 5, "Arthur's Eleven");
+        bytes memory arthurCreateAlliance = abi.encodeWithSelector(DominationGame.createAlliance.selector, arthur, 5, "Arthur's Eleven");
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, arthurCreateAlliance)));
         vm.stopPrank();
         
         vm.startPrank(w1nt3r);
-        bytes memory w1nt3rRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
+        bytes memory w1nt3rRest = abi.encodeWithSelector(DominationGame.rest.selector, w1nt3r);
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, w1nt3rRest)));
         vm.stopPrank();
 
@@ -486,27 +488,27 @@ contract DomStrategyGameTest is Test {
         vm.startPrank(piskomate);
         bytes memory piskomateApplication = abi.encodePacked(turn, allianceId);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(arthur_pk, keccak256(piskomateApplication));
-        bytes memory piskomateJoin = abi.encodeWithSelector(DomStrategyGame.joinAlliance.selector, piskomate, allianceId, v, r, s);
+        bytes memory piskomateJoin = abi.encodeWithSelector(DominationGame.joinAlliance.selector, piskomate, allianceId, v, r, s);
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce5, piskomateJoin)));
         vm.stopPrank();
 
         vm.startPrank(dhof);
         bytes memory dhofApplication = abi.encodePacked(turn, allianceId);
         (uint8 dhof_v, bytes32 dhof_r, bytes32 dhof_s) = vm.sign(arthur_pk, keccak256(dhofApplication));
-        bytes memory dhofJoin = abi.encodeWithSelector(DomStrategyGame.joinAlliance.selector, dhof, allianceId, dhof_v, dhof_r, dhof_s);
+        bytes memory dhofJoin = abi.encodeWithSelector(DominationGame.joinAlliance.selector, dhof, allianceId, dhof_v, dhof_r, dhof_s);
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce6, dhofJoin)));
         vm.stopPrank();
 
         // Arthur is the creator so he can just rest()
         vm.startPrank(arthur);
-        bytes memory arthurRest = abi.encodeWithSelector(DomStrategyGame.rest.selector, arthur);
+        bytes memory arthurRest = abi.encodeWithSelector(DominationGame.rest.selector, arthur);
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce7, arthurRest)));
         vm.stopPrank();
         
         // 1 stay out
         // W1nt3r doens't join but instead moves in position to attack Arthur
         vm.startPrank(w1nt3r);
-        bytes memory w1nt3rMove = abi.encodeWithSelector(DomStrategyGame.move.selector, w1nt3r, int8(-2));
+        bytes memory w1nt3rMove = abi.encodeWithSelector(DominationGame.move.selector, w1nt3r, int8(-2));
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce8, w1nt3rMove)));
         vm.stopPrank();
 
@@ -548,12 +550,12 @@ contract DomStrategyGameTest is Test {
 
         /******* Game Stage 0: Submit ********/
         vm.startPrank(piskomate);
-        bytes memory piskomateRestAgain = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
+        bytes memory piskomateRestAgain = abi.encodeWithSelector(DominationGame.rest.selector, piskomate);
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce9, piskomateRestAgain)));
         vm.stopPrank();
 
         vm.startPrank(dhof);
-        bytes memory dhofRestAgain = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+        bytes memory dhofRestAgain = abi.encodeWithSelector(DominationGame.rest.selector, dhof);
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce10, dhofRestAgain)));
         vm.stopPrank();
 
@@ -575,12 +577,12 @@ contract DomStrategyGameTest is Test {
         
         // let Arthur win the battle against W1nt3r, so his Alliance wins the game
         vm.startPrank(arthur);
-        bytes memory arthurMoveAgain = abi.encodeWithSelector(DomStrategyGame.move.selector, arthur, int8(2));
+        bytes memory arthurMoveAgain = abi.encodeWithSelector(DominationGame.move.selector, arthur, int8(2));
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce11, arthurMoveAgain)));
         vm.stopPrank();
         
         vm.startPrank(w1nt3r);
-        bytes memory w1nt3rRestAgain = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
+        bytes memory w1nt3rRestAgain = abi.encodeWithSelector(DominationGame.rest.selector, w1nt3r);
         game.submit(turn, keccak256(abi.encodePacked(turn, nonce12, w1nt3rRestAgain)));
         vm.stopPrank();
 
@@ -622,7 +624,7 @@ contract DomStrategyGameTest is Test {
 
         // vm.startPrank(w1nt3r);
         // vm.expectRevert(abi.encodeWithSelector(
-        //         DomStrategyGame.OnlyWinningAllianceMember.selector
+        //         DominationGame.OnlyWinningAllianceMember.selector
         //     ));
         // game.withdrawWinnerAlliance();
         // vm.stopPrank();
@@ -663,24 +665,24 @@ contract DomStrategyGameTest is Test {
     //         .checked_write(jailY - 1);
 
     //     vm.startPrank(piskomate);
-    //     bytes memory piskomateCall = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
+    //     bytes memory piskomateCall = abi.encodeWithSelector(DominationGame.rest.selector, piskomate);
     //     game.submit(turn, keccak256(abi.encodePacked(turn, nonce1, piskomateCall)));
     //     vm.stopPrank();
 
     //     vm.startPrank(dhof);
-    //     bytes memory dhofCall = abi.encodeWithSelector(DomStrategyGame.rest.selector, dhof);
+    //     bytes memory dhofCall = abi.encodeWithSelector(DominationGame.rest.selector, dhof);
     //     game.submit(turn, keccak256(abi.encodePacked(turn, nonce2, dhofCall)));
     //     vm.stopPrank();
 
     //     // let Arthur land on jail cell
     //     vm.startPrank(arthur);
-    //     bytes memory arthurCall = abi.encodeWithSelector(DomStrategyGame.move.selector, arthur, int8(1));
+    //     bytes memory arthurCall = abi.encodeWithSelector(DominationGame.move.selector, arthur, int8(1));
     //     game.submit(turn, keccak256(abi.encodePacked(turn, nonce3, arthurCall)));
     //     vm.stopPrank();
             
     //     //  w1nt3r can do wtv idc
     //     vm.startPrank(w1nt3r);
-    //     bytes memory w1nt3rCall = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
+    //     bytes memory w1nt3rCall = abi.encodeWithSelector(DominationGame.rest.selector, w1nt3r);
     //     game.submit(turn, keccak256(abi.encodePacked(turn, nonce4, w1nt3rCall)));
     //     vm.stopPrank();
         
@@ -740,8 +742,8 @@ contract DomStrategyGameTest is Test {
         /** ===== Turn 1, Game Stage 0 (Submit) ===== */
         vm.warp(game.gameStartTimestamp() + 1 seconds);
         
-        bytes memory call1 = abi.encodeWithSelector(DomStrategyGame.rest.selector, piskomate);
-        bytes memory call2 = abi.encodeWithSelector(DomStrategyGame.rest.selector, w1nt3r);
+        bytes memory call1 = abi.encodeWithSelector(DominationGame.rest.selector, piskomate);
+        bytes memory call2 = abi.encodeWithSelector(DominationGame.rest.selector, w1nt3r);
         uint256 turn = game.currentTurn();
         bytes32 nonce1 = hex"01";
         bytes32 nonce2 = hex"02";

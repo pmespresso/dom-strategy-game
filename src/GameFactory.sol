@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.17;
 
-import 'forge-std/console.sol';
 import "chainlink/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "chainlink/v0.8/interfaces/AutomationRegistryInterface1_2.sol";
 import "chainlink/v0.8/interfaces/LinkTokenInterface.sol";

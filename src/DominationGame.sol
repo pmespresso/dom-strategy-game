@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.17;
 
-import 'forge-std/console.sol';
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 import "openzeppelin-contracts/contracts/utils/structs/EnumerableMap.sol";
 import "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
@@ -27,12 +26,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
     EnumerableMap.UintToAddressMap private activePlayers;
     EnumerableMap.AddressToUintMap internal spoils;
 
-    // bring your own NFT kinda
-    // BAYC, Sappy Seal, Pudgy Penguins, Azuki, Doodles
-    // address[] allowedNFTs = [
-    //     0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D, 0x364C828eE171616a39897688A831c2499aD972ec, 0xBd3531dA5CF5857e7CfAA92426877b022e612cf8, 0xED5AF388653567Af2F388E6224dC7C4b3241C544, 0x8a90CAb2b38dba80c64b7734e58Ee1dB38B8992e
-    // ];
-
     // Keepers
     uint256 public interval;
     uint256 public lastUpkeepTimestamp;
@@ -57,16 +50,16 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
     uint256 public currentTurn;
     uint256 public currentTurnStartTimestamp;
     uint256 public constant maxPlayers = 100;
-    uint256 public activePlayersCount = 0;
-    uint256 public activeAlliancesCount = 0;
+    uint256 public activePlayersCount;
+    uint256 public activeAlliancesCount;
     uint256 public winningTeamSpoils;
-    uint256 public nextAvailableRow = 0; // TODO make random to prevent position sniping...?
-    uint256 public nextAvailableCol = 0;
+    uint256 public nextAvailableRow; // TODO make random to prevent position sniping...?
+    uint256 public nextAvailableCol;
     uint256 public winnerAllianceId;
     uint256 public fieldSize;
-    uint256 internal nextInmateId = 0;
-    uint256 internal inmatesCount = 0;
-    uint256 internal nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
+    uint256 internal nextInmateId;
+    uint256 internal inmatesCount;
+    uint256 internal nextAvailableAllianceId;
     address public winnerPlayer;
     address[] public inmates = new address[](maxPlayers);
     
@@ -126,11 +119,12 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         address linkToken,
         bytes32 keyHash,
         uint64 subscriptionId,
-        uint256 updateInterval) VRFConsumerBaseV2(0x7a1BaC17Ccc5b313516C5E16fb24f7659aA5ebed) 
+        uint256 updateInterval) VRFConsumerBaseV2(vrfCoordinator) 
     payable {
         // FIXME with governance
         admin = msg.sender;
         fieldSize = maxPlayers; // also the max players
+        nextAvailableAllianceId = 1;
 
         // VRF
         COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
@@ -210,8 +204,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
     function submit(uint256 turn, bytes32 commitment) external {
         require(currentTurn > 0, "Not started");
         require(turn == currentTurn, "Stale tx");
-        // submit stage is interval set by deployer
-        // require(block.timestamp <= currentTurnStartTimestamp + interval, "Submit stage has passed.");
         require(gameStage == GameStage.Submit, "Only callable during the Submit Game Stage");
 
         players[msg.sender].pendingMoveCommitment = commitment;
@@ -225,9 +217,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         bytes calldata data
     ) external {
         require(turn == currentTurn, "Stale tx");
-        // then another interval for the reveal stage
-        // require(block.timestamp > currentTurnStartTimestamp + interval, "Reveal Stage has not started yet");
-        // require(block.timestamp < currentTurnStartTimestamp + interval * 2, "Reveal Stage has passed");
         require(gameStage == GameStage.Reveal, "Only callable during the Reveal Game Stage");
 
 
@@ -329,7 +318,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         bytes32 r,
         bytes32 s
     ) external onlyViaSubmitReveal {
-
         // Admin must sign the application off-chain. Applications are per-move based, so the player
         // can't reuse the application from the previous move
         bytes memory application = abi.encodePacked(currentTurn, allianceId);
@@ -347,8 +335,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
 
         alliances[allianceId].activeMembersCount += 1;
         alliances[allianceId].membersCount += 1;
-        console.log("alliance total balance ", alliances[allianceId].totalBalance);
-        console.log("new alliance joiner balance ", players[player].balance);
         alliances[allianceId].totalBalance += players[player].balance;
         if (allianceMembers[allianceId].length > 0) {
             allianceMembers[allianceId].push(player);
@@ -484,7 +470,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
 
         if (activeAlliancesCount == 1) {
             for (uint256 i = 1; i <= nextAvailableAllianceId; i++) {
-                console.log("Alliance active members count: ", alliances[i].activeMembersCount);
                 if (alliances[i].activeMembersCount == activePlayersCount) {
                     _declareWinner(alliances[i].id);
                     break;
@@ -573,12 +558,9 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         nextInmateId += 1;
         inmatesCount += 1;
 
-        console.log("Jailed player alliance: ", player.allianceId);
-
         if (player.allianceId != 0) {
             Alliance storage alliance = alliances[player.allianceId];
             alliance.activeMembersCount -= 1;
-            console.log("jailed alliance member => new active members count: ", alliance.activeMembersCount);
         }
 
         emit Jail(player.addr, inmatesCount);
@@ -601,12 +583,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         }
     }
 
-    /**
-        @param attackerAddr the player who initiates the battle by caling move() into the defender's space
-        @param defenderAddr the player who just called rest() minding his own business, or just was unfortunate in the move order, i.e. PlayerA and PlayerB both move to Cell{1,3} but if PlayerA is there first, he will have to defend.
-
-        In reality they both attack each other but the attacker will go first.
-     */
     function _battle(address attackerAddr, address defenderAddr) internal {
         require(attackerAddr != defenderAddr, "Cannot fight yourself");
 
@@ -644,7 +620,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         emit DamageDealt(defender.addr, attacker.addr, effectiveDamage2);
     }
 
-
     // Callbacks
     function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords)
         internal
@@ -658,7 +633,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
     }
 
     function requestRandomWords() public {
-        
         // Will revert if subscription is not set and funded.
         vrf_requestId = COORDINATOR.requestRandomWords(
         vrf_keyHash,
@@ -771,8 +745,7 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
                             emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
                         }    
                     }
-                    console.log("-------sendToJailCalls[i - 1]-----");
-                    console.logBytes(sendToJailCalls[i - 1]);
+
                     if (keccak256(sendToJailCalls[i - 1]) != keccak256(bytes(""))) {
                         (bool success, ) = address(this).call(sendToJailCalls[i - 1]);
 
@@ -808,11 +781,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         }
         lastUpkeepTimestamp = block.timestamp;
     }
-
-    // TODO: lose half your spoils but you get to leave with your NFT
-    // function rageQuit() external {
-
-    // } 
 
     // Fallback function must be declared as external.
     fallback() external payable {

@@ -6,7 +6,7 @@ import "forge-std/console.sol";
 import "chainlink/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 
 import "./HelperConfig.sol";
-import "../src/DomStrategyGame.sol";
+import "../src/DominationGame.sol";
 import "../src/BaseCharacter.sol";
 
 contract DeployGame is Script {
@@ -18,6 +18,8 @@ contract DeployGame is Script {
         ,
         ,
         address link,
+        ,
+        ,
         ,
         ,
         uint64 subscriptionId,
@@ -33,7 +35,7 @@ contract DeployGame is Script {
         // test params
         // call resolve every 5 minutes
         // start game 10 minutes after deploy
-        DomStrategyGame game = new DomStrategyGame(vrfCoordinator, link, keyHash, subscriptionId, 5 minutes);
+        DominationGame game = new DominationGame(vrfCoordinator, link, keyHash, subscriptionId, 5 minutes);
 
         // Mint Domination Base Characters to test accounts
         BaseCharacter character = new BaseCharacter();
