@@ -33,7 +33,7 @@ contract DeployGame is Script {
         // test params
         // call resolve every 5 minutes
         // start game 10 minutes after deploy
-        DomStrategyGame game = new DomStrategyGame(vrfCoordinator, link, subscriptionId, keyHash, 5 minutes, block.timestamp + 10 minutes);
+        DomStrategyGame game = new DomStrategyGame(vrfCoordinator, link, keyHash, subscriptionId, 5 minutes);
 
         // Mint Domination Base Characters to test accounts
         BaseCharacter character = new BaseCharacter();

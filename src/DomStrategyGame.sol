@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.17;
 
+import 'forge-std/console.sol';
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
+import "openzeppelin-contracts/contracts/utils/structs/EnumerableMap.sol";
 import "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721Receiver.sol";
 import "chainlink/v0.8/AutomationCompatible.sol";
@@ -9,51 +11,21 @@ import "chainlink/v0.8/interfaces/LinkTokenInterface.sol";
 import "chainlink/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "chainlink/v0.8/VRFConsumerBaseV2.sol";
 
-// TODO: Pack this struct once we know all the fields
-struct Player {
-    address addr;
-    address nftAddress;
-    uint256 tokenId;
-    uint256 balance;
-    uint256 lastMoveTimestamp;
-    uint256 allianceId;
-    uint256 hp;
-    uint256 attack;
-    uint256 x;
-    uint256 y;
-    bytes32 pendingMoveCommitment;
-    bytes pendingMove;
-    bool inJail;
-}
+import "./interfaces/IDominationGame.sol";
 
-struct Alliance {
-    address admin;
-    uint256 id;
-    uint256 membersCount;
-    uint256 maxMembers;
-    uint256 totalBalance; // used for calc cut of spoils in win condition
-    string name;
-}
-
-struct JailCell {
-    uint256 x;
-    uint256 y;
-}
-
-enum GameStage {
-    Submit,
-    Reveal,
-    Resolve
-}
-
-contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBaseV2 {
+contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBaseV2, IDominationGame {
+    using EnumerableMap for EnumerableMap.UintToAddressMap;
+    using EnumerableMap for EnumerableMap.AddressToUintMap;
+    // TODO: get rid of this in favor of governance
+    address public admin;
     JailCell public jailCell;
     mapping(address => Player) public players;
+    mapping(uint256 => mapping(uint256 => address)) public playingField;
     mapping(uint256 => Alliance) public alliances;
     mapping(uint256 => address[]) public allianceMembers;
-    mapping(uint256 => address) public allianceAdmins;
-    mapping(address => uint256) public spoils;
-    mapping(uint256 => mapping(uint256 => address)) public playingField;
+    EnumerableMap.UintToAddressMap internal allianceAdmins;
+    EnumerableMap.UintToAddressMap private activePlayers;
+    EnumerableMap.AddressToUintMap internal spoils;
 
     // bring your own NFT kinda
     // BAYC, Sappy Seal, Pudgy Penguins, Azuki, Doodles
@@ -66,136 +38,130 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     uint256 public lastUpkeepTimestamp;
     uint256 public gameStartTimestamp;
     bool public gameStarted;
+    bool public gameEnded;
 
     // VRF
     VRFCoordinatorV2Interface immutable COORDINATOR;
     LinkTokenInterface immutable LINKTOKEN;
-    address public vrf_owner;
-    uint256 public randomness;
+    address internal vrf_owner;
+    // FIXME: change to 0
+    uint256 internal randomness = 78541660797044910968829902406342334108369226379826116161446442989268089806461;
     uint256 public vrf_requestId;
     bytes32 immutable vrf_keyHash;
     uint16 immutable vrf_requestConfirmations = 3;
-    uint32 immutable vrf_callbackGasLimit = 2_500_000;
-    uint32 immutable vrf_numWords = 3;
-    uint64 public vrf_subscriptionId;
+    uint32 immutable vrf_callbackGasLimit = 500_000;
+    uint32 immutable vrf_numWords = 1;
+    uint64 internal vrf_subscriptionId;
 
     // Game
     uint256 public currentTurn;
     uint256 public currentTurnStartTimestamp;
     uint256 public constant maxPlayers = 100;
-    uint256 public activePlayersCount;
-    uint256 public activeAlliances;
+    uint256 public activePlayersCount = 0;
+    uint256 public activeAlliancesCount = 0;
     uint256 public winningTeamSpoils;
-    uint256 public nextAvailableRow = 0;// TODO make random to prevent position sniping...?
+    uint256 public nextAvailableRow = 0; // TODO make random to prevent position sniping...?
     uint256 public nextAvailableCol = 0;
     uint256 public winnerAllianceId;
     uint256 public fieldSize;
     uint256 internal nextInmateId = 0;
     uint256 internal inmatesCount = 0;
-    uint256 nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
+    uint256 internal nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
     address public winnerPlayer;
     address[] public inmates = new address[](maxPlayers);
-    address[] activePlayers;
     
     GameStage public gameStage;
 
-    error LoserTriedWithdraw();
-    error OnlyWinningAllianceMember();
+    modifier onlyGame() {
+        require(msg.sender == address(this), "Only callable by game contract");
+        _;
+    }
 
-    event ReturnedRandomness(uint256[] randomWords);
-    event Constructed(address indexed owner, uint64 indexed subscriptionId, uint256 indexed _gameStartTimestamp);
-    event Joined(address indexed addr);
-    event TurnStarted(uint256 indexed turn, uint256 timestamp);
-    event Submitted(
-        address indexed addr,
-        uint256 indexed turn,
-        bytes32 commitment
-    );
-    event Revealed(
-        address indexed addr,
-        uint256 indexed turn,
-        bytes32 nonce,
-        bytes data
-    );
-    event BadMovePenalty(
-        uint256 indexed turn,
-        address indexed player,
-        bytes details
-    );
-    event NoReveal(
-        address indexed who,
-        uint256 indexed turn
-    );
-    event NoSubmit(
-        address indexed who,
-        uint256 indexed turn
-    );
-    event AllianceCreated(
-        address indexed admin,
-        uint256 indexed allianceId,
-        string name
-    );
-    event AllianceMemberJoined(
-        uint256 indexed allianceId,
-        address indexed player
-    );
-    event AllianceMemberLeft(
-        uint256 indexed allianceId,
-        address indexed player
-    );
-    event UpkeepCheck(uint256 indexed currentTimestamp, uint256 indexed lastUpkeepTimestamp, bool indexed upkeepNeeded);
-    event BattleCommenced(address indexed player1, address indexed defender);
-    event BattleFinished(address indexed winner, uint256 indexed spoils);
-    event DamageDealt(address indexed by, address indexed to, uint256 indexed amount);
-    event Move(address indexed who, uint newX, uint newY);
-    event NftConfiscated(address indexed who, address indexed nftAddress, uint256 indexed tokenId);
-    event WinnerPlayer(address indexed winner);
-    event WinnerAlliance(uint indexed allianceId);
-    event WinnerWithdrawSpoils(address indexed winner, uint256 indexed spoils);
-    event Jail(address indexed who, uint256 indexed inmatesCount);
-    event AttemptJailBreak(address indexed who, uint256 x, uint256 y);
-    event JailBreak(address indexed who, uint256 newInmatesCount);
-    event GameStartDelayed(uint256 indexed newStartTimeStamp);
-    event SkipInmateTurn(address indexed who, uint256 indexed turn);
-    event RolledDice(uint256 indexed turn, uint256 indexed vrf_request_id);
-    event NewGameStage(GameStage indexed newGameStage);
+    modifier onlyOwnerAndSelf() {
+        require(msg.sender == vrf_owner || msg.sender == address(this));
+        _;
+    }
+
+    modifier onlyWinningAllianceMember() {
+        require(winnerAllianceId != 0, "Only call this if an alliance has won.");
+        
+        address[] memory winners = allianceMembers[winnerAllianceId];
+
+        bool winnerFound = false;
+
+        for(uint i = 0; i < winners.length; i++) {
+            if (winners[i] == msg.sender) {
+                winnerFound = true;
+            }
+        }
+        
+        if (winnerFound) {
+            _;
+        }  else {
+            revert OnlyWinningAllianceMember();
+        }
+    }
+
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Only admin can call this");
+        _;
+    }
+
+    modifier onlyWinner() {
+        if (winnerPlayer == address(this)) {
+            require(msg.sender == admin, "Only admin can withdraw if game was the ultimate winner.");
+        } else {
+            require(msg.sender == winnerPlayer, "Only winner can call this");
+        }
+        _;
+    }
+
+    modifier onlyViaSubmitReveal() {
+        require(msg.sender == address(this), "Only via submit/reveal");
+        _;
+    }
 
     constructor(
-        address _vrfCoordinator,
-        address _linkToken,
-        uint64 _subscriptionId,
-        bytes32 _keyHash,
-        uint256 updateInterval,
-        uint256 _gameStartTimestamp) VRFConsumerBaseV2(_vrfCoordinator) 
+        address vrfCoordinator,
+        address linkToken,
+        bytes32 keyHash,
+        uint64 subscriptionId,
+        uint256 updateInterval) VRFConsumerBaseV2(0x7a1BaC17Ccc5b313516C5E16fb24f7659aA5ebed) 
     payable {
+        // FIXME with governance
+        admin = msg.sender;
         fieldSize = maxPlayers; // also the max players
 
         // VRF
-        COORDINATOR = VRFCoordinatorV2Interface(_vrfCoordinator);
-        LINKTOKEN = LinkTokenInterface(_linkToken);
-        vrf_keyHash = _keyHash;
+        COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
+        LINKTOKEN = LinkTokenInterface(linkToken);
+        vrf_keyHash = keyHash;
         vrf_owner = msg.sender;
-        vrf_subscriptionId = _subscriptionId;
+        vrf_subscriptionId = subscriptionId;
 
         // Keeper
         interval = updateInterval;
         lastUpkeepTimestamp = block.timestamp;
-        gameStartTimestamp = _gameStartTimestamp;
+        gameStartTimestamp = block.timestamp + updateInterval;
 
-        emit Constructed(vrf_owner, vrf_subscriptionId, _gameStartTimestamp);
+        emit Constructed(vrf_owner, vrf_subscriptionId, gameStartTimestamp);
     }
 
     function connect(uint256 tokenId, address byoNft) external payable {
         require(currentTurn == 0, "Already started");
-        require(spoils[msg.sender] == 0, "Already joined");
+        (bool isSpoils,) = spoils.tryGet(msg.sender);
+        require(!isSpoils, "Already joined");
         require(players[msg.sender].addr == address(0), "Already joined");
+        require(activePlayersCount < maxPlayers, "Already at max players");
         // Your share of the spoils if you win as part of an alliance are proportional to how much you paid to connect.
         require(msg.value > 0, "Send some eth");
 
-        // N.B. for now just verify ownership, later maybe put it up as collateral as the spoils, instead of the ETH balance.
-        // prove ownership of one of the NFTs in the allowList
+        // Verify Ownership
         uint256 nftBalance = IERC721(byoNft).balanceOf(msg.sender);
         require(nftBalance > 0, "You dont own this NFT you liar");
+
+        // Approve for confiscation if misbehave during game
+        IERC721(byoNft).setApprovalForAll(address(this), true);
 
         Player memory player = Player({
             addr: msg.sender,
@@ -214,11 +180,10 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         });
 
         playingField[nextAvailableRow][nextAvailableCol] = msg.sender;
-        spoils[msg.sender] = msg.value;
+        spoils.set(msg.sender, msg.value);
         players[msg.sender] = player;
-        activePlayers.push(msg.sender);
-        // every independent player initially gets counted as an alliance, when they join or leave  or die, retally
-        activeAlliances += 1;
+        activePlayers.set(activePlayersCount + 1, msg.sender);
+
         activePlayersCount += 1;
         nextAvailableCol = (nextAvailableCol + 2) % fieldSize;
         nextAvailableRow = nextAvailableCol == 0 ? nextAvailableRow + 1 : nextAvailableRow;
@@ -235,9 +200,9 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         currentTurnStartTimestamp = block.timestamp;
         gameStarted = true;
         gameStage = GameStage.Submit;
-        emit NewGameStage(GameStage.Submit);
+        emit NewGameStage(GameStage.Submit, currentTurn);
 
-        jailCell = JailCell({ x: randomness / 1e75, y: randomness % 99});
+        jailCell = JailCell({ x: randomness / 1e75, y: randomness % 99 });
 
         emit TurnStarted(currentTurn, currentTurnStartTimestamp);
     }
@@ -269,93 +234,11 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
 
-        // console.log("=== commitment ===");
-        // console.logBytes32(commitment);
-
-        // console.log("=== proof ===");
-        // console.logBytes32(proof);
-
         require(commitment == proof, "No cheating");
 
         players[msg.sender].pendingMove = data;
 
         emit Revealed(msg.sender, currentTurn, nonce, data);
-    }
-
-    // The turns are processed in random order. The contract offloads sorting the players
-    // list off-chain to save gas
-    function resolve() internal {
-        require(randomness != 0, "Roll the die first");
-        require(gameStage == GameStage.Resolve, "Only callable during the Resolve Game Stage");
-
-        if (currentTurn % 5 == 0) {
-            fieldSize -= 2;
-        }
-
-        // TODO: this will exceed block gas limit eventually, need to split `resolve` in a way that it can be called incrementally
-        // TODO: don't start at 0 every time, use vrf or some heuristic
-        for (uint256 i = 0; i < activePlayersCount; i++) {
-            address addr = activePlayers[i];
-
-            Player storage player = players[addr];
-
-            // If you're in jail you no longer get to do shit. Just hope somebody breaks you out.
-            if (player.inJail) {
-                emit SkipInmateTurn(player.addr, currentTurn);
-                continue;
-            }
-            
-            // If player straight up didn't submit then confiscate their NFT and send to jail
-            if (player.pendingMoveCommitment == bytes32(0)) {
-                emit NoSubmit(player.addr, currentTurn);
-
-                IERC721(player.nftAddress).safeTransferFrom(player.addr, address(this), player.tokenId);
-
-                emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
-
-                sendToJail(player.addr);
-                continue;
-            } else if (player.pendingMoveCommitment != bytes32(0) && player.pendingMove.length == 0) { // If player submitted but forgot to reveal, move them to jail
-                emit NoReveal(player.addr, currentTurn);
-                sendToJail(player.addr);
-                // if you are in jail but your alliance wins, you still get a cut of the spoils
-                continue;
-            }
-
-            (bool success, bytes memory err) = address(this).call(player.pendingMove);
-
-            if (!success) {
-                // Player submitted a bad move
-                if (int(player.balance - 0.05 ether) >= 0) {
-                    player.balance -= 0.05 ether;
-                    spoils[player.addr] == player.balance;
-                    emit BadMovePenalty(currentTurn, player.addr, err);
-                } else {
-                    sendToJail(player.addr);
-                }
-            }
-
-            // Outside the field, apply storm damage
-            if (player.x > fieldSize || player.y > fieldSize) {
-                if (int(player.hp - 10) >= 0) {
-                    player.hp -= 10;
-                    emit DamageDealt(address(this), player.addr, 10);
-                } else {
-                    // if he dies, spoils just get added to the total winningTeamSpoils and he goes to jail
-                    winningTeamSpoils += spoils[player.addr];
-                    sendToJail(player.addr);
-                }
-            }
-
-            player.pendingMove = "";
-            player.pendingMoveCommitment = bytes32(0);
-        }
-
-        randomness = 0;
-        currentTurn += 1;
-        currentTurnStartTimestamp = block.timestamp;
-
-        emit TurnStarted(currentTurn, currentTurnStartTimestamp);
     }
 
     // (-1, 1) = (up, down)
@@ -395,32 +278,33 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
             _jailbreak(msg.sender);
         }
 
-        if (checkIfCanAttack(invader.addr, currentOccupant)) {
+        if (_checkIfCanAttack(invader.addr, currentOccupant)) {
             _battle(player, currentOccupant);
         } else {
             playingField[invader.x][invader.y] = address(0);
             invader.x = newX;
             invader.y = newY;
         }
-        // TODO: Change order after
-        emit Move(invader.addr, invader.x, invader.y);
+
         playingField[invader.x][invader.y] = player;
-        
+        emit Move(invader.addr, invader.x, invader.y);        
     }
 
     function rest(address player) external onlyViaSubmitReveal {
         players[player].hp += 2;
+        emit Rest(players[player].addr, players[player].x, players[player].y);
     }
 
     function createAlliance(address player, uint256 maxMembers, string calldata name) external onlyViaSubmitReveal {
         require(players[player].allianceId == 0, "Already in alliance");
 
         players[player].allianceId = nextAvailableAllianceId;
-        allianceAdmins[nextAvailableAllianceId] = player;
+        allianceAdmins.set(nextAvailableAllianceId, player);
 
         Alliance memory newAlliance = Alliance({
             admin: player,
             id: nextAvailableAllianceId,
+            activeMembersCount: 1,
             membersCount: 1,
             maxMembers: maxMembers,
             totalBalance: players[player].balance,
@@ -433,6 +317,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         }
         alliances[nextAvailableAllianceId] = newAlliance;
         nextAvailableAllianceId += 1;
+        activeAlliancesCount += 1;
 
         emit AllianceCreated(player, nextAvailableAllianceId, name);
     }
@@ -451,24 +336,25 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
 
         bytes32 hash = keccak256(application);
         // address admin = ECDSA.recover(hash, signature
-        address admin = ecrecover(hash, v, r, s);
+        address allianceAdmin = ecrecover(hash, v, r, s);
 
-        require(allianceAdmins[allianceId] == admin, "Not signed by admin");
+        require(allianceAdmins.get(allianceId) == allianceAdmin, "Not signed by admin");
         players[player].allianceId = allianceId;
         
         Alliance memory alliance = alliances[allianceId];
         
         require(alliance.membersCount < alliance.maxMembers - 1, "Cannot exceed max members count.");
 
+        alliances[allianceId].activeMembersCount += 1;
         alliances[allianceId].membersCount += 1;
+        console.log("alliance total balance ", alliances[allianceId].totalBalance);
+        console.log("new alliance joiner balance ", players[player].balance);
         alliances[allianceId].totalBalance += players[player].balance;
         if (allianceMembers[allianceId].length > 0) {
             allianceMembers[allianceId].push(player);
         } else {
             allianceMembers[allianceId] = [player];
         }
-        
-        activeAlliances -= 1;
 
         emit AllianceMemberJoined(players[player].allianceId, player);
     }
@@ -476,7 +362,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     function leaveAlliance(address player) external onlyViaSubmitReveal {
         uint256 allianceId = players[player].allianceId;
         require(allianceId != 0, "Not in alliance");
-        require(player != allianceAdmins[players[player].allianceId], "Admin canot leave alliance");
+        require(player != allianceAdmins.get(players[player].allianceId), "Admin canot leave alliance");
 
         players[player].allianceId = 0;
         
@@ -487,8 +373,12 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         }
 
         alliances[allianceId].membersCount -= 1;
+        alliances[allianceId].activeMembersCount -= 1;
         alliances[allianceId].totalBalance -= players[player].balance;
-        activeAlliances += 1;
+
+        if (alliances[allianceId].membersCount <= 1) {
+            _destroyAlliance(allianceId);
+        }
 
         emit AllianceMemberLeft(allianceId, player);
     }
@@ -501,18 +391,124 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         (bool sent, ) = msg.sender.call{ value: myCut }("");
 
         require(sent, "Failed to withdraw spoils");
+
+        gameStage = GameStage.Finished;
+        emit GameFinished(currentTurn, winningTeamSpoils);
     }
 
     function withdrawWinnerPlayer() onlyWinner external {
-        (bool sent, ) = winnerPlayer.call{ value: spoils[winnerPlayer] }("");
+        (bool sent, ) = winnerPlayer.call{ value: spoils.get(winnerPlayer) }("");
         require(sent, "Failed to withdraw winnings");
-        spoils[winnerPlayer] = 0;
-        emit WinnerWithdrawSpoils(winnerPlayer, spoils[winnerPlayer]);
+        spoils.set(winnerPlayer, 0);
+        emit WinnerWithdrawSpoils(winnerPlayer, spoils.get(winnerPlayer));
+        gameStage = GameStage.Finished;
+        emit GameFinished(currentTurn, winningTeamSpoils);
     }
 
     /**** Internal Functions *****/
 
-    function calcWinningAllianceSpoils() internal {
+    function _handleBattleLoser(address _loser, address _winner) internal {
+        Player storage loser = players[_loser];
+        Player storage winner = players[_winner];
+
+        // Winner moves into Loser's old spot
+        winner.x = loser.x;
+        winner.y = loser.y;
+        playingField[winner.x][winner.y] = winner.addr;
+
+        // Loser vacates current position and then moves to jail 
+        playingField[loser.x][loser.y] = address(0);
+        _sendToJail(loser.addr);
+
+        // Winner takes Loser's spoils
+        spoils.set(winner.addr, spoils.get(winner.addr) + spoils.get(loser.addr));
+        spoils.set(loser.addr, 0);
+        
+        // Case: Winner was in an Alliance
+        if (winner.allianceId != 0) {
+            Alliance storage attackerAlliance = alliances[winner.allianceId];
+            attackerAlliance.totalBalance += spoils.get(loser.addr);
+        }
+
+        // Case: Loser was not in an Alliance
+        if (loser.allianceId == 0) {
+            _checkWinCondition();
+        } else { 
+            // Case: Loser was in an Alliance
+            
+             // Also will need to leave the alliance cuz ded
+            Alliance storage loserAlliance = alliances[loser.allianceId];
+            loserAlliance.totalBalance -= spoils.get(loser.addr);
+            loserAlliance.membersCount -= 1;
+            loserAlliance.activeMembersCount -= 1;
+            loser.allianceId = 0;
+
+            if (loserAlliance.membersCount <= 1) {
+                // if you're down to one member, ain't no alliance left
+                _destroyAlliance(loser.allianceId);
+            }
+
+            _checkWinCondition();
+        }
+    }
+
+    function _destroyAlliance(uint256 allianceId) internal {
+    // if you're down to one member, ain't no alliance left
+        activeAlliancesCount -= 1;
+        delete alliances[allianceId];
+        allianceAdmins.set(allianceId, address(0));
+    }
+
+    // If one player remains, they get the spoils
+    // If no one remains, the contract gets the spoils
+    function _declareWinner(address who) internal {
+        winnerPlayer = who;
+        emit WinnerPlayer(who);
+        gameStarted = false;
+        gameStage = GameStage.PendingWithdrawals;
+        emit NewGameStage(GameStage.PendingWithdrawals, currentTurn);
+    }
+    
+    // If an alliance won
+    function _declareWinner(uint256 _winnerAllianceId) internal {
+        winnerAllianceId = _winnerAllianceId;
+        emit WinnerAlliance(_winnerAllianceId);
+        _calcWinningAllianceSpoils();
+        gameStarted = false;
+        gameStage = GameStage.PendingWithdrawals;
+        emit NewGameStage(GameStage.PendingWithdrawals, currentTurn);
+    }
+
+    function _checkWinCondition() internal {
+        emit CheckingWinCondition(activeAlliancesCount, activePlayersCount);
+
+        if (activeAlliancesCount == 1) {
+            for (uint256 i = 1; i <= nextAvailableAllianceId; i++) {
+                console.log("Alliance active members count: ", alliances[i].activeMembersCount);
+                if (alliances[i].activeMembersCount == activePlayersCount) {
+                    _declareWinner(alliances[i].id);
+                    break;
+                }
+            }
+        } else {
+            address who;
+            if (activePlayersCount == 1) {
+                for (uint256 i = 1; i < activePlayersCount; i++) {
+                    if (activePlayers.get(i) != address(0)) {
+                        who = activePlayers.get(i);
+                        break;
+                    }
+                }
+            } else if (activePlayersCount == 0) {
+                who = address(this);
+            }
+            if (who != address(0)) {
+                _declareWinner(who);
+            }
+        }
+    }
+
+    function _calcWinningAllianceSpoils() internal {
         require(winnerAllianceId != 0);
         
         address[] memory winners = allianceMembers[winnerAllianceId];
@@ -520,13 +516,75 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         uint256 totalSpoils = 0;
 
         for (uint256 i = 0; i < winners.length; i++) {
-            totalSpoils += spoils[winners[i]];
+            totalSpoils += spoils.get(winners[i]);
         }
 
         winningTeamSpoils = totalSpoils;
     }
 
-    function checkIfCanAttack(address meAddr, address otherGuyAddr) internal view returns (bool) {
+    function _jailbreak(address breakerOuter) internal {
+        // if it's greater than threshold everybody get out, including non alliance members
+        if (randomness % 99 > 50) {
+            for (uint256 i = 0; i < inmates.length; i++) {
+                address inmate = inmates[i];
+                if (inmate != address(0)) {
+                    _freeFromJail(inmate, i);
+                }
+            }
+            inmates = new address[](maxPlayers); // everyone broke free so just reset
+        } else {
+            // if lower then roller gets jailed as well lol
+            _sendToJail(breakerOuter);
+        }
+    }
+
+    // N.b right now the scope is to just free if somebody lands on the cell and rolls a good number.
+    // could be fun to make an option for a player to bribe (pay some amount to free just alliance members)
+    function _freeFromJail(address playerAddress, uint256 inmateIndex) internal {
+        Player storage player = players[playerAddress];
+
+        player.hp = 50;
+        player.x = jailCell.x;
+        player.y = jailCell.y;
+        player.inJail = false;
+        activePlayersCount += 1;
+
+        delete inmates[inmateIndex];
+        inmatesCount -= 1;
+
+        if (player.allianceId != 0) {
+            Alliance storage alliance = alliances[player.allianceId];
+            alliance.activeMembersCount += 1;
+        }
+
+        emit JailBreak(player.addr, inmatesCount);
+    }
+
+    // N.B. only external/public functions have a .selector so change visibiltiy or call it another way.
+    function _sendToJail(address playerAddress) public onlyGame {
+        Player storage player = players[playerAddress];
+
+        player.hp = 0;
+        player.x = jailCell.x;
+        player.y = jailCell.y;
+        player.inJail = true;
+        activePlayersCount -= 1;
+        inmates[nextInmateId] = player.addr;
+        nextInmateId += 1;
+        inmatesCount += 1;
+
+        console.log("Jailed player alliance: ", player.allianceId);
+
+        if (player.allianceId != 0) {
+            Alliance storage alliance = alliances[player.allianceId];
+            alliance.activeMembersCount -= 1;
+            console.log("jailed alliance member => new active members count: ", alliance.activeMembersCount);
+        }
+
+        emit Jail(player.addr, inmatesCount);
+    }
+
+    function _checkIfCanAttack(address meAddr, address otherGuyAddr) internal view returns (bool) {
         Player memory me = players[meAddr];
         Player memory otherGuy = players[otherGuyAddr];
 
@@ -552,8 +610,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     function _battle(address attackerAddr, address defenderAddr) internal {
         require(attackerAddr != defenderAddr, "Cannot fight yourself");
 
-        Player storage attacker = players[attackerAddr];
-        Player storage defender = players[defenderAddr];
+        Player memory attacker = players[attackerAddr];
+        Player memory defender = players[defenderAddr];
 
         require(attacker.allianceId == 0 || defender.allianceId == 0 || attacker.allianceId != defender.allianceId, "Allies do not fight");
 
@@ -564,119 +622,14 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         uint256 effectiveDamage2 = (defender.attack / (randomness % 99)) + 1;
 
         // Attacker goes first. There is an importance of who goes first, because if both have an effective damage enough to kill the other, the one who strikes first would win.
-       if (int(defender.hp) - int(effectiveDamage1) <= 0) {// Case 2: player 2 lost
-            // console.log("Attacker won");
-            // Attacker moves to Defender's old spot
-            attacker.x = defender.x;
-            attacker.y = defender.y;
-            playingField[attacker.x][attacker.y] = attacker.addr;
-
-            // Defender vacates current position
-            playingField[defender.x][defender.y] = address(0);
-            // And then moves to jail
-            sendToJail(defender.addr);
-
-            // attacker takes defender's spoils
-            spoils[attacker.addr] += spoils[defender.addr];
-            spoils[defender.addr] = 0;
-            
-            // If Winner was in an Alliance
-            if (attacker.allianceId != 0) {
-                Alliance storage attackerAlliance = alliances[attacker.allianceId];
-                attackerAlliance.totalBalance += spoils[defender.addr];
-            }
-                
-            // If Loser was in an Alliance
-            if (defender.allianceId != 0) {
-                // Also will need to leave the alliance cuz ded
-                Alliance storage defenderAlliance = alliances[defender.allianceId];
-                defenderAlliance.totalBalance -= spoils[defender.addr];
-                defenderAlliance.membersCount -= 1;
-                defender.allianceId = 0;
-
-                if (defenderAlliance.membersCount == 1) {
-                    // if you're down to one member, ain't no alliance left
-                    activeAlliances -= 1;
-                    activePlayersCount -= 1;
-                }
-
-                // console.log("Defender was in an alliance: ", activeAlliances);
-
-                if (activeAlliances == 1) {
-                    winnerAllianceId = defenderAlliance.id;
-                    calcWinningAllianceSpoils();
-                    emit WinnerAlliance(winnerAllianceId);
-                }
-            } else {
-                activePlayersCount -= 1;
-                activeAlliances -= 1;
-
-                Alliance storage attackerAlliance = alliances[attacker.allianceId];
-                // console.log("Defender was NOT in an alliance: ", activeAlliances);
-                if (activePlayersCount == 1) {
-                    // win condition
-                    winnerPlayer = attacker.addr;
-                    emit WinnerPlayer(winnerPlayer);
-                }
-
-                if (activeAlliances == 1) {
-                    winnerAllianceId = attackerAlliance.id;
-                    calcWinningAllianceSpoils();
-                    emit WinnerAlliance(winnerAllianceId);
-                }
-            }
+       if (int(defender.hp) - int(effectiveDamage1) <= 0) {
+            _handleBattleLoser(defender.addr, attacker.addr);
         } else if (int(attacker.hp) - int(effectiveDamage2) <= 0) {
-            // console.log("Defender won");
-            // Defender remains where he is, Attack goes to jail
-
-            // Attacker vacates current position
-            playingField[attacker.x][attacker.y] = address(0);
-            // And moves to jail
-            sendToJail(attacker.addr);
-
-            // Defender takes Attacker's spoils
-            spoils[defender.addr] += spoils[attacker.addr];
-            spoils[attacker.addr] = 0;
-
-            // If Defender was in an Alliance
-            if (defender.allianceId != 0) {
-                Alliance storage defenderAlliance = alliances[defender.allianceId];
-                defenderAlliance.totalBalance += spoils[attacker.addr];
-            }
-
-            // if Attacker was in an alliance
-            if (attacker.allianceId != 0) {
-                // Also will need to leave the alliance cuz ded
-                Alliance storage attackerAlliance = alliances[attacker.allianceId];
-
-                attackerAlliance.totalBalance -= spoils[attacker.addr];
-                attackerAlliance.membersCount -= 1;
-                attacker.allianceId = 0;
-
-                if (attackerAlliance.membersCount == 1) {
-                    // if you're down to one member, ain't no alliance left
-                    activeAlliances -= 1;
-                    activePlayersCount -= 1;
-                }
-
-                if (activeAlliances == 1) {
-                    winnerAllianceId = attackerAlliance.id;
-                    calcWinningAllianceSpoils();
-                    emit WinnerAlliance(winnerAllianceId);
-                }
-            } else {
-                activePlayersCount -= 1;
-
-                if (activePlayersCount == 1) {
-                    // win condition
-                    winnerPlayer = defender.addr;
-                    emit WinnerPlayer(winnerPlayer);
-                }
-            }
+            _handleBattleLoser(attacker.addr, defender.addr);
         } else {
-            // console.log("Neither lost");
             attacker.hp -= effectiveDamage2;
             defender.hp -= effectiveDamage1;
+            emit BattleStalemate(attacker.hp, defender.hp);
         }
 
         if (attacker.inJail == false) {
@@ -691,52 +644,6 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         emit DamageDealt(defender.addr, attacker.addr, effectiveDamage2);
     }
 
-    function _jailbreak(address breakerOuter) internal {
-        // if it's greater than threshold everybody get out, including non alliance members
-        if (randomness % 99 > 50) {
-            for (uint256 i = 0; i < inmates.length; i++) {
-                address inmate = inmates[i];
-                if (inmate != address(0)) {
-                    freeFromJail(inmate, i);
-                }
-            }
-            inmates = new address[](maxPlayers); // everyone broke free so just reset
-        } else {
-            // if lower then roller gets jailed as well lol
-            sendToJail(breakerOuter);
-        }
-    }
-
-    // N.b right now the scope is to just free if somebody lands on the cell and rolls a good number.
-    // could be fun to make an option for a player to bribe (pay some amount to free just alliance members)
-    function freeFromJail(address playerAddress, uint256 inmateIndex) internal {
-        Player storage player = players[playerAddress];
-
-        player.hp = 50;
-        player.x = jailCell.x;
-        player.y = jailCell.y;
-        player.inJail = false;
-
-        delete inmates[inmateIndex];
-        inmatesCount -= 1;
-
-        emit JailBreak(player.addr, inmatesCount);
-    }
-
-    // TODO: Make internal 
-    function sendToJail(address playerAddress) public {
-        Player storage player = players[playerAddress];
-
-        player.hp = 0;
-        player.x = jailCell.x;
-        player.y = jailCell.y;
-        player.inJail = true;
-        inmates[nextInmateId] = player.addr;
-        nextInmateId += 1;
-        inmatesCount += 1;
-
-        emit Jail(player.addr, inmatesCount);
-    }
 
     // Callbacks
     function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords)
@@ -750,7 +657,8 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         emit ReturnedRandomness(randomWords);
     }
 
-    function requestRandomWords() public onlyOwnerAndSelf {
+    function requestRandomWords() public {
+        
         // Will revert if subscription is not set and funded.
         vrf_requestId = COORDINATOR.requestRandomWords(
         vrf_keyHash,
@@ -762,43 +670,6 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         emit RolledDice(vrf_requestId, currentTurn + 1);
     }
 
-    modifier onlyOwnerAndSelf() {
-        require(msg.sender == vrf_owner || msg.sender == address(this));
-        _;
-    }
-
-    modifier onlyWinningAllianceMember() {
-        require(winnerAllianceId != 0, "Only call this if an alliance has won.");
-        
-        address[] memory winners = allianceMembers[winnerAllianceId];
-
-        bool winnerFound = false;
-
-        for(uint i = 0; i < winners.length; i++) {
-            if (winners[i] == msg.sender) {
-                winnerFound = true;
-            }
-        }
-        
-        if (winnerFound) {
-            _;
-        }  else {
-            revert OnlyWinningAllianceMember();
-        }
-    }
-
-    modifier onlyWinner() {
-        if(msg.sender != winnerPlayer) {
-            revert LoserTriedWithdraw();
-        }
-        _;
-    }
-
-    modifier onlyViaSubmitReveal() {
-        require(msg.sender == address(this), "Only via submit/reveal");
-        _;
-    }
-
     function setSubscriptionId(uint64 subId) public onlyOwnerAndSelf {
         vrf_subscriptionId = subId;
     }
@@ -807,30 +678,121 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
         vrf_owner = owner;
     }
 
-     function checkUpkeep(bytes memory) public returns (bool, bytes memory) {
-        bool upkeepNeeded = (block.timestamp - lastUpkeepTimestamp) >= interval;
-        emit UpkeepCheck(block.timestamp, lastUpkeepTimestamp, upkeepNeeded);
-        bytes memory performData = bytes("");
+    function checkUpkeep(bytes calldata) external view override returns (bool, bytes memory performData) {
+        performData = bytes("");
+        bool upkeepNeeded = (block.timestamp - lastUpkeepTimestamp) >= interval && gameStage != GameStage.Finished && gameStage != GameStage.PendingWithdrawals;
+
+        if (upkeepNeeded) {
+            address[] memory playersWithPendingMoves = new address[](activePlayersCount);
+            bytes[] memory pendingMoveCalls = new bytes[](activePlayersCount);
+            bytes[] memory confiscationCalls = new bytes[](activePlayersCount);
+            bytes[] memory sendToJailCalls = new bytes[](activePlayersCount);
+
+            for (uint256 i = 1; i <= activePlayersCount; i++) {
+                Player memory player = players[activePlayers.get(i)];
+
+                if (!player.inJail) {
+                    playersWithPendingMoves[i - 1] = player.addr;
+                }
+                // If player straight up didn't submit then confiscate their NFT and send to jail
+                if (player.pendingMoveCommitment == bytes32(0)) {
+                    // emit NoSubmit(player.addr, currentTurn);
+                    
+                    confiscationCalls[i - 1] = abi.encodeWithSelector(
+                        bytes4(
+                            keccak256(
+                                bytes("safeTransferFrom(address,address,uint256,bytes)"))), player.addr, address(this), player.tokenId, "");
+
+                    sendToJailCalls[i - 1] = abi.encodeWithSelector(
+                        bytes4(
+                            keccak256(
+                                bytes("_sendToJail(address)"))), player.addr);
+
+                    continue;
+                } else if (player.pendingMoveCommitment != bytes32(0) && player.pendingMove.length == 0) { // If player submitted but forgot to reveal, move them to jail
+                    sendToJailCalls[i - 1] = abi.encodeWithSelector(
+                                bytes4(
+                                    keccak256(
+                                        bytes("_sendToJail(address)"))), player.addr);
+
+                    // if you are in jail but your alliance wins, you still get a cut of the spoils
+                    continue;
+                }
+
+                pendingMoveCalls[i - 1] = player.pendingMove;
+            }
+
+            performData = abi.encode(playersWithPendingMoves, pendingMoveCalls, confiscationCalls, sendToJailCalls);
+        }
 
         return (upkeepNeeded, performData);
     }
 
-    function performUpkeep(bytes calldata) external {
-        bool upkeepNeeded = (block.timestamp - lastUpkeepTimestamp) >= interval;
-        emit UpkeepCheck(block.timestamp, lastUpkeepTimestamp, upkeepNeeded);
-
+    function performUpkeep(bytes calldata performData) external override {
         if (gameStarted) {
+            _checkWinCondition();
             if (gameStage == GameStage.Submit) {
                 gameStage = GameStage.Reveal;
-                emit NewGameStage(GameStage.Reveal);
-                requestRandomWords();
+                emit NewGameStage(GameStage.Reveal, currentTurn);
             } else if (gameStage == GameStage.Reveal) {
                 gameStage = GameStage.Resolve;
-                emit NewGameStage(GameStage.Resolve);
-                resolve();
+                emit NewGameStage(GameStage.Resolve, currentTurn);
+
+                require(randomness != 0, "Roll the die first");
+
+                (address[] memory playersWithPendingMoves, bytes[] memory pendingMoveCalls, bytes[] memory confiscationCalls,bytes[] memory sendToJailCalls) = abi.decode(performData, (address[], bytes[],  bytes[], bytes[]));
+
+                for (uint256 i = 1; i <= playersWithPendingMoves.length; i++) {
+                    Player memory player = players[activePlayers.get(i)];
+
+                    if (keccak256(pendingMoveCalls[i - 1]) != keccak256(bytes(""))) {
+                        (bool success, bytes memory err) = address(this).call(pendingMoveCalls[i - 1]);
+
+                        if (!success) {
+                            // Player submitted a bad move
+                            if (int(player.balance - 0.05 ether) >= 0) {
+                                player.balance -= 0.05 ether;
+                                spoils.set(player.addr, player.balance);
+                                emit BadMovePenalty(currentTurn, player.addr, err);
+                            } else {
+                                player.balance = 0;
+                                spoils.set(player.addr, player.balance);
+                                _sendToJail(player.addr);
+                                _checkWinCondition();
+                            }
+                        }
+                    }
+                    
+                    if (keccak256(confiscationCalls[i - 1]) != keccak256(bytes(""))) {
+                        (bool success, ) = address(player.nftAddress).call(confiscationCalls[i - 1]);
+
+                        if (success) {
+                            emit NoSubmit(player.addr, currentTurn);
+                            emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
+                        }    
+                    }
+                    console.log("-------sendToJailCalls[i - 1]-----");
+                    console.logBytes(sendToJailCalls[i - 1]);
+                    if (keccak256(sendToJailCalls[i - 1]) != keccak256(bytes(""))) {
+                        (bool success, ) = address(this).call(sendToJailCalls[i - 1]);
+
+                        if (success) {
+                            emit NoReveal(player.addr, currentTurn);
+                        }
+                    }
+                    
+                    if (playersWithPendingMoves[i - 1] != address(0)) {
+                        players[playersWithPendingMoves[i - 1]].pendingMove = "";
+                        players[playersWithPendingMoves[i - 1]].pendingMoveCommitment = bytes32(0);
+                    }   
+                }
+                
+                currentTurn += 1;
+                currentTurnStartTimestamp = block.timestamp;
+                emit TurnStarted(currentTurn, currentTurnStartTimestamp);
             } else if (gameStage == GameStage.Resolve) {
                 gameStage = GameStage.Submit;
-                emit NewGameStage(GameStage.Submit);
+                emit NewGameStage(GameStage.Submit, currentTurn);
             }
         } else {
             // check if max players or game start time reached
@@ -839,12 +801,29 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
                     start();
                 } else {
                     // not enough people joined then keep pushing it back till the day comes ㅠㅠ
-                    gameStartTimestamp += interval;
+                    gameStartTimestamp = block.timestamp + interval;
                     emit GameStartDelayed(gameStartTimestamp);
                 }
             }
         }
         lastUpkeepTimestamp = block.timestamp;
+    }
+
+    // TODO: lose half your spoils but you get to leave with your NFT
+    // function rageQuit() external {
+
+    // } 
+
+    // Fallback function must be declared as external.
+    fallback() external payable {
+        // send / transfer (forwards 2300 gas to this fallback function)
+        // call (forwards all of the gas)
+        emit Fallback(msg.value, gasleft());
+    }
+
+    receive() external payable {
+        // custom function code
+        emit Received(msg.value, gasleft());
     }
 
     function onERC721Received(
