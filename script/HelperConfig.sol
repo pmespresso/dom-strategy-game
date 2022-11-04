@@ -10,6 +10,8 @@ contract HelperConfig {
         uint256 chainlinkFee;
         address link;
         uint256 updateInterval;
+        address keeperRegistry;
+        address keeperRegistrar;
         address priceFeed;
         uint64 subscriptionId;
         address vrfCoordinator;
@@ -37,6 +39,8 @@ contract HelperConfig {
             chainlinkFee: 1e17,
             link: 0x326C977E6efc84E512bB9C30f76E30c160eD06FB,
             updateInterval: 60, // Keeper (in seconds)
+            keeperRegistry: 0x02777053d6764996e594c3E88AF1D58D5363a2e6,
+            keeperRegistrar: 0xDb8e8e2ccb5C033938736aa89Fe4fa1eDfD15a1d,
             priceFeed: 0x8A753747A1Fa494EC906cE90E9f37563A8AF630e, // ETH / USD
             subscriptionId: 1374, // VRF
             vrfCoordinator: 0x7a1BaC17Ccc5b313516C5E16fb24f7659aA5ebed, // VRF
@@ -55,6 +59,8 @@ contract HelperConfig {
             chainlinkFee: 1e17,
             link: 0x326C977E6efc84E512bB9C30f76E30c160eD06FB,
             updateInterval: 60, // every minute
+            keeperRegistry: address(0),
+            keeperRegistrar: address(0),
             priceFeed: address(0), // ETH / USD
             subscriptionId: 0, // UPDATE ME!
             vrfCoordinator: 0x2Ca8E0C643bDe4C2E08ab1fA0da3401AdAD7734D,
@@ -73,6 +79,8 @@ contract HelperConfig {
             chainlinkFee: 1e17,
             link: address(0), // This is a mock
             updateInterval: 60, // every minute
+            keeperRegistry: address(0),
+            keeperRegistrar: address(0),
             priceFeed: address(0), // This is a mock
             subscriptionId: 0,
             vrfCoordinator: address(0), // This is a mock
