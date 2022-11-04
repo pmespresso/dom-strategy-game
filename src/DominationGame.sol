@@ -13,7 +13,7 @@ import "chainlink/v0.8/VRFConsumerBaseV2.sol";
 
 import "./interfaces/IDominationGame.sol";
 
-contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBaseV2, IDominationGame {
+contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBaseV2, IDominationGame {
     using EnumerableMap for EnumerableMap.UintToAddressMap;
     using EnumerableMap for EnumerableMap.AddressToUintMap;
     // TODO: get rid of this in favor of governance
