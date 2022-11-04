@@ -49,7 +49,7 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     uint256 public vrf_requestId;
     bytes32 immutable vrf_keyHash;
     uint16 immutable vrf_requestConfirmations = 3;
-    uint32 immutable vrf_callbackGasLimit = 2_500_000;
+    uint32 immutable vrf_callbackGasLimit = 500_000;
     uint32 immutable vrf_numWords = 1;
     uint64 internal vrf_subscriptionId;
 
@@ -108,8 +108,10 @@ contract DomStrategyGame is IERC721Receiver, AutomationCompatible, VRFConsumerBa
     }
 
     modifier onlyWinner() {
-        if(msg.sender != winnerPlayer) {
-            revert LoserTriedWithdraw();
+        if (winnerPlayer == address(this)) {
+            require(msg.sender == admin, "Only admin can withdraw if game was the ultimate winner.");
+        } else {
+            require(msg.sender == winnerPlayer, "Only winner can call this");
         }
         _;
     }
