@@ -12,4 +12,4 @@ deploy-mumbai :; forge script script/DeployGame.s.sol:DeployGame --fork-url ${MU
 
 deploy-base-char-mumbai :; forge script script/DeployBaseCharacter.s.sol:DeployBaseCharacter --fork-url ${MUMBAI_RPC_URL} --via-ir --private-key=${MUMBAI_PRIVATE_KEY} --gas-limit=7500000 --verify --optimize --optimizer-runs 200 --broadcast --use 0.8.17 --etherscan-api-key ${POLYGONSCAN_API_KEY} -vvvv
 
-verify-game :; forge verify-contract --watch 0x37fa830d9220007e8819e2a961e9bcdce9e2794c src/DomStrategyGame.sol:DomStrategyGame ${POLYGONSCAN_API_KEY}
+verify-game :; forge verify-contract --watch 0x37fa830d9220007e8819e2a961e9bcdce9e2794c src/DominationGame.sol:DominationGame ${POLYGONSCAN_API_KEY}
