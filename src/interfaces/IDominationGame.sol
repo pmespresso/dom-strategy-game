@@ -80,7 +80,7 @@ interface IDominationGame {
     event WinnerAlliance(uint indexed allianceId);
     event WinnerWithdrawSpoils(address indexed winner, uint256 indexed spoils);
     
-
+    function currentTurn() external view returns (uint256);
     function currentTurnStartTimestamp() view external returns (uint256);
     function gameStage() view external returns (GameStage);
     function move(address player, int8 direction) external;
@@ -89,6 +89,7 @@ interface IDominationGame {
     function connect(uint256 tokenId, address byoNft) external payable;
     function submit(uint256 turn, bytes32 commitment) external;
     function reveal(uint256 turn, bytes32 nonce, bytes calldata data) external;
+    function withdrawWinnerPlayer() external;
 }
 
 
