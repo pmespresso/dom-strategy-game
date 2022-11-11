@@ -24,9 +24,10 @@ struct IPlayer {
 }
 
 /**
-    Goes right for 10 turns the left for 10 turns, whether or not it fights.
+    Creates and alliance as quickly as possible or joins one if it exists already.
+    Then moves around in a square.
  */
-contract HorizontalBot is AutomationCompatible, IERC721Receiver {
+contract AllianceBot is AutomationCompatible, IERC721Receiver {
     address public deployer;
     address public gameAddr;
     address public byoNftAddr;
@@ -41,6 +42,8 @@ contract HorizontalBot is AutomationCompatible, IERC721Receiver {
     mapping(uint256 => bool) didSubmitForTurn;
     mapping(uint256 => bool) didRevealForTurn;
     
+    event JoinAlliance(uint256 indexed allianceId, uint256 indexed turn, string indexed allianceName);
+    event CreateAlliance(uint256 indexed allianceId, uint256 indexed turn, string indexed allianceName);
     event Submitting(uint256 turn, bytes commitment);
     event Revealing(uint256 turn, bytes commitment);
     event Fallback(uint256 amount, uint256 gasLeft);
@@ -78,7 +81,6 @@ contract HorizontalBot is AutomationCompatible, IERC721Receiver {
     }
 
     function joinGame (uint256 _tokenId) internal {
-        // require(address(this).balance > 0, "Send some ETH to bot to pay for gas.");
         game.connect{value: STARTING_SPOILS}(_tokenId, byoNftAddr);
     }
 
@@ -118,19 +120,38 @@ contract HorizontalBot is AutomationCompatible, IERC721Receiver {
     ) external override {
         lastUpkeepTurn += 1;
 
-        (address addr,,,,,,,,,,,,) = game.players(address(this));
+        (address addr,,,,,uint256 allianceId,,,,,,,) = game.players(address(this));
 
         if (!game.gameStarted() || addr == address(0)) {
             joinGame(byoNftTokenId);
             return;
         }
 
-        int8 direction = lastUpkeepTurn % 10 == 0 ? int8(2) : int8(-2);
+        int8 direction = lastUpkeepTurn % 2 == 0 ? int8(2) : lastUpkeepTurn % 3 == 0 ? int8(1) : lastUpkeepTurn % 5 == 0 ? int8(-1) : int8(-2);
 
-        bytes memory commitment = abi.encodeWithSelector(
-            game.move.selector,
-            direction
-        );
+        bytes memory commitment;
+        uint256 nextAllianceId = game.nextAvailableAllianceId();
+
+        // if not in alliance, join one or create one
+        if (allianceId == 0) {
+            if (nextAllianceId == 1) { // no other alliances exist
+                commitment = abi.encodeWithSelector(game.createAlliance.selector, address(this), 3, "Beep Boop Alliance");
+                emit CreateAlliance(nextAllianceId, lastUpkeepTurn, "Beep Boop Alliance");
+            } else {
+                (,,, uint256 membersCount, uint256 maxMembers,, string memory allianceName) = game.alliances(nextAllianceId - 1);
+
+                if (membersCount < maxMembers) {
+                    commitment = abi.encodeWithSelector(game.joinAlliance.selector, allianceId);
+                    emit JoinAlliance(allianceId, lastUpkeepTurn, allianceName);
+                }
+                
+            }
+        } else {
+            commitment = abi.encodeWithSelector(
+                game.move.selector,
+                direction
+            );
+        }
 
         if (game.gameStage() == GameStage.Submit) {
             game.submit(lastUpkeepTurn, keccak256(abi.encodePacked(lastUpkeepTurn, bytes32(nonce), commitment)));
@@ -144,6 +165,11 @@ contract HorizontalBot is AutomationCompatible, IERC721Receiver {
             if (game.spoils(address(this)) > 0) {
                 game.withdrawWinnerPlayer();
                 emit WithdrewWinnings();
+            } else if (game.winnerAllianceId() == allianceId) {
+                game.withdrawWinnerAlliance();
+                emit WithdrewWinnings();
+            } else {
+                emit NoMoreToDo();
             }
             emit NoMoreToDo();
         }

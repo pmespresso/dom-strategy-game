@@ -80,16 +80,24 @@ interface IDominationGame {
     event WinnerAlliance(uint indexed allianceId);
     event WinnerWithdrawSpoils(address indexed winner, uint256 indexed spoils);
     
+    function alliances(uint256 allianceId) external view returns (address, uint256, uint256, uint256, uint256, uint256, string memory);
+    function connect(uint256 tokenId, address byoNft) external payable;
+    function createAlliance(address player, uint256 maxMembers, string calldata name) external;
     function currentTurn() external view returns (uint256);
     function currentTurnStartTimestamp() view external returns (uint256);
+    function gameStarted() view external returns (bool);
     function gameStage() view external returns (GameStage);
-    function move(address player, int8 direction) external;
-    function players(address player) view external returns (address, address, uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint256, bytes32, bytes memory, bool);
     function interval() view external returns (uint256);
-    function connect(uint256 tokenId, address byoNft) external payable;
+    function joinAlliance(address player, uint256 allianceId, uint8 v, bytes32 r, bytes32 s) external;
+    function move(address player, int8 direction) external;
+    function nextAvailableAllianceId() view external returns (uint256);
+    function players(address player) view external returns (address, address, uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint256, bytes32, bytes memory, bool);
+    function spoils(address who) external returns (uint256);
     function submit(uint256 turn, bytes32 commitment) external;
     function reveal(uint256 turn, bytes32 nonce, bytes calldata data) external;
+    function withdrawWinnerAlliance() external;
     function withdrawWinnerPlayer() external;
+    function winnerAllianceId() external view returns (uint256);
 }
 
 

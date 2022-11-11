@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.17;
 
-import 'forge-std/console.sol';
 import "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 import "openzeppelin-contracts/contracts/utils/structs/EnumerableMap.sol";
 import "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
@@ -25,13 +24,7 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
     mapping(uint256 => address[]) public allianceMembers;
     EnumerableMap.UintToAddressMap internal allianceAdmins;
     EnumerableMap.UintToAddressMap private activePlayers;
-    EnumerableMap.AddressToUintMap internal spoils;
-
-    // bring your own NFT kinda
-    // BAYC, Sappy Seal, Pudgy Penguins, Azuki, Doodles
-    // address[] allowedNFTs = [
-    //     0xBC4CA0EdA7647A8aB7C2061c2E118A18a936f13D, 0x364C828eE171616a39897688A831c2499aD972ec, 0xBd3531dA5CF5857e7CfAA92426877b022e612cf8, 0xED5AF388653567Af2F388E6224dC7C4b3241C544, 0x8a90CAb2b38dba80c64b7734e58Ee1dB38B8992e
-    // ];
+    mapping(address => uint256) public spoils;
 
     // Keepers
     uint256 public interval;
@@ -66,7 +59,7 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
     uint256 public fieldSize;
     uint256 internal nextInmateId = 0;
     uint256 internal inmatesCount = 0;
-    uint256 internal nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
+    uint256 public nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
     address public winnerPlayer;
     address[] public inmates = new address[](maxPlayers);
     
@@ -126,7 +119,7 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         address linkToken,
         bytes32 keyHash,
         uint64 subscriptionId,
-        uint256 updateInterval) VRFConsumerBaseV2(0x7a1BaC17Ccc5b313516C5E16fb24f7659aA5ebed) 
+        uint256 updateInterval) VRFConsumerBaseV2(vrfCoordinator) 
     payable {
         // FIXME with governance
         admin = msg.sender;
@@ -149,8 +142,7 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
 
     function connect(uint256 tokenId, address byoNft) external payable {
         require(currentTurn == 0, "Already started");
-        (bool isSpoils,) = spoils.tryGet(msg.sender);
-        require(!isSpoils, "Already joined");
+        require(spoils[msg.sender] == 0, "Already joined");
         require(players[msg.sender].addr == address(0), "Already joined");
         require(activePlayersCount < maxPlayers, "Already at max players");
         // Your share of the spoils if you win as part of an alliance are proportional to how much you paid to connect.
@@ -180,7 +172,7 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         });
 
         playingField[nextAvailableRow][nextAvailableCol] = msg.sender;
-        spoils.set(msg.sender, msg.value);
+        spoils[msg.sender] = msg.value;
         players[msg.sender] = player;
         activePlayers.set(activePlayersCount + 1, msg.sender);
 
@@ -211,7 +203,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         require(currentTurn > 0, "Not started");
         require(turn == currentTurn, "Stale tx");
         // submit stage is interval set by deployer
-        // require(block.timestamp <= currentTurnStartTimestamp + interval, "Submit stage has passed.");
         require(gameStage == GameStage.Submit, "Only callable during the Submit Game Stage");
 
         players[msg.sender].pendingMoveCommitment = commitment;
@@ -225,11 +216,7 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         bytes calldata data
     ) external {
         require(turn == currentTurn, "Stale tx");
-        // then another interval for the reveal stage
-        // require(block.timestamp > currentTurnStartTimestamp + interval, "Reveal Stage has not started yet");
-        // require(block.timestamp < currentTurnStartTimestamp + interval * 2, "Reveal Stage has passed");
         require(gameStage == GameStage.Reveal, "Only callable during the Reveal Game Stage");
-
 
         bytes32 commitment = players[msg.sender].pendingMoveCommitment;
         bytes32 proof = keccak256(abi.encodePacked(turn, nonce, data));
@@ -347,8 +334,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
 
         alliances[allianceId].activeMembersCount += 1;
         alliances[allianceId].membersCount += 1;
-        console.log("alliance total balance ", alliances[allianceId].totalBalance);
-        console.log("new alliance joiner balance ", players[player].balance);
         alliances[allianceId].totalBalance += players[player].balance;
         if (allianceMembers[allianceId].length > 0) {
             allianceMembers[allianceId].push(player);
@@ -397,16 +382,20 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
     }
 
     function withdrawWinnerPlayer() onlyWinner external {
-        (bool sent, ) = winnerPlayer.call{ value: spoils.get(winnerPlayer) }("");
+        if (winnerPlayer == address(this) || winnerPlayer == address(admin)) {
+            (bool sent, ) = winnerPlayer.call{ value: address(this).balance }("");
+            require(sent, "Failed to withdraw winnings");
+        }
+
+        (bool sent, ) = winnerPlayer.call{ value: spoils[winnerPlayer] }("");
         require(sent, "Failed to withdraw winnings");
-        spoils.set(winnerPlayer, 0);
-        emit WinnerWithdrawSpoils(winnerPlayer, spoils.get(winnerPlayer));
+        spoils[winnerPlayer] = 0;
+        emit WinnerWithdrawSpoils(winnerPlayer, spoils[winnerPlayer]);
         gameStage = GameStage.Finished;
         emit GameFinished(currentTurn, winningTeamSpoils);
     }
 
     /**** Internal Functions *****/
-
     function _handleBattleLoser(address _loser, address _winner) internal {
         Player storage loser = players[_loser];
         Player storage winner = players[_winner];
@@ -421,13 +410,13 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         _sendToJail(loser.addr);
 
         // Winner takes Loser's spoils
-        spoils.set(winner.addr, spoils.get(winner.addr) + spoils.get(loser.addr));
-        spoils.set(loser.addr, 0);
+        spoils[winner.addr] += spoils[loser.addr];
+        spoils[loser.addr] = 0;
         
         // Case: Winner was in an Alliance
         if (winner.allianceId != 0) {
             Alliance storage attackerAlliance = alliances[winner.allianceId];
-            attackerAlliance.totalBalance += spoils.get(loser.addr);
+            attackerAlliance.totalBalance += spoils[loser.addr];
         }
 
         // Case: Loser was not in an Alliance
@@ -438,7 +427,7 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
             
              // Also will need to leave the alliance cuz ded
             Alliance storage loserAlliance = alliances[loser.allianceId];
-            loserAlliance.totalBalance -= spoils.get(loser.addr);
+            loserAlliance.totalBalance -= spoils[loser.addr];
             loserAlliance.membersCount -= 1;
             loserAlliance.activeMembersCount -= 1;
             loser.allianceId = 0;
@@ -484,7 +473,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
 
         if (activeAlliancesCount == 1) {
             for (uint256 i = 1; i <= nextAvailableAllianceId; i++) {
-                console.log("Alliance active members count: ", alliances[i].activeMembersCount);
                 if (alliances[i].activeMembersCount == activePlayersCount) {
                     _declareWinner(alliances[i].id);
                     break;
@@ -516,7 +504,7 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         uint256 totalSpoils = 0;
 
         for (uint256 i = 0; i < winners.length; i++) {
-            totalSpoils += spoils.get(winners[i]);
+            totalSpoils += spoils[winners[i]];
         }
 
         winningTeamSpoils = totalSpoils;
@@ -573,12 +561,9 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         nextInmateId += 1;
         inmatesCount += 1;
 
-        console.log("Jailed player alliance: ", player.allianceId);
-
         if (player.allianceId != 0) {
             Alliance storage alliance = alliances[player.allianceId];
             alliance.activeMembersCount -= 1;
-            console.log("jailed alliance member => new active members count: ", alliance.activeMembersCount);
         }
 
         emit Jail(player.addr, inmatesCount);
@@ -752,11 +737,11 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
                             // Player submitted a bad move
                             if (int(player.balance - 0.05 ether) >= 0) {
                                 player.balance -= 0.05 ether;
-                                spoils.set(player.addr, player.balance);
+                                spoils[player.addr] = player.balance;
                                 emit BadMovePenalty(currentTurn, player.addr, err);
                             } else {
                                 player.balance = 0;
-                                spoils.set(player.addr, player.balance);
+                                spoils[player.addr] = player.balance;
                                 _sendToJail(player.addr);
                                 _checkWinCondition();
                             }
@@ -771,8 +756,7 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
                             emit NftConfiscated(player.addr, player.nftAddress, player.tokenId);
                         }    
                     }
-                    console.log("-------sendToJailCalls[i - 1]-----");
-                    console.logBytes(sendToJailCalls[i - 1]);
+
                     if (keccak256(sendToJailCalls[i - 1]) != keccak256(bytes(""))) {
                         (bool success, ) = address(this).call(sendToJailCalls[i - 1]);
 
@@ -800,6 +784,7 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
                 if (activePlayersCount >= 2) {
                     start();
                 } else {
+                    requestRandomWords();
                     // not enough people joined then keep pushing it back till the day comes ㅠㅠ
                     gameStartTimestamp = block.timestamp + interval;
                     emit GameStartDelayed(gameStartTimestamp);
@@ -808,11 +793,6 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
         }
         lastUpkeepTimestamp = block.timestamp;
     }
-
-    // TODO: lose half your spoils but you get to leave with your NFT
-    // function rageQuit() external {
-
-    // } 
 
     // Fallback function must be declared as external.
     fallback() external payable {
