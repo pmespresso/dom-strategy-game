@@ -37,8 +37,7 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
     VRFCoordinatorV2Interface immutable COORDINATOR;
     LinkTokenInterface immutable LINKTOKEN;
     address internal vrf_owner;
-    // FIXME: change to 0
-    uint256 internal randomness = 78541660797044910968829902406342334108369226379826116161446442989268089806461;
+    uint256 internal randomness;
     uint256 public vrf_requestId;
     bytes32 immutable vrf_keyHash;
     uint16 immutable vrf_requestConfirmations = 3;
@@ -50,15 +49,15 @@ contract DominationGame is IERC721Receiver, AutomationCompatible, VRFConsumerBas
     uint256 public currentTurn;
     uint256 public currentTurnStartTimestamp;
     uint256 public constant maxPlayers = 100;
-    uint256 public activePlayersCount = 0;
-    uint256 public activeAlliancesCount = 0;
+    uint256 public activePlayersCount;
+    uint256 public activeAlliancesCount;
     uint256 public winningTeamSpoils;
-    uint256 public nextAvailableRow = 0; // TODO make random to prevent position sniping...?
-    uint256 public nextAvailableCol = 0;
+    uint256 public nextAvailableRow; // TODO make random to prevent position sniping...?
+    uint256 public nextAvailableCol;
     uint256 public winnerAllianceId;
     uint256 public fieldSize;
-    uint256 internal nextInmateId = 0;
-    uint256 internal inmatesCount = 0;
+    uint256 internal nextInmateId;
+    uint256 internal inmatesCount;
     uint256 public nextAvailableAllianceId = 1; // start at 1 because 0 means you ain't joined one yet
     address public winnerPlayer;
     address[] public inmates = new address[](maxPlayers);
